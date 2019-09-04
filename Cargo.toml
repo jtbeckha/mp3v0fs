@@ -1,0 +1,13 @@
+[package]
+name = "mp3v0fs"
+version = "0.1.0"
+authors = ["Jared <jared@jaredbeckham.com>"]
+edition = "2018"
+
+[dependencies]
+libc = "0.2"
+#fuse = "0.3.1"
+log = "^0.4.8"
+fuse_mt = "0.5.0"
+simplelog = "0.5.0"
+time = "0.1"
