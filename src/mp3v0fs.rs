@@ -14,6 +14,7 @@ use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::os::unix::fs::MetadataExt;
 use std::os::unix::io::{FromRawFd, IntoRawFd};
 use std::path::{Path, PathBuf};
+use std::vec::Vec;
 use time::Timespec;
 
 use super::libc_extras::libc;
@@ -113,8 +114,23 @@ impl Mp3V0Fs {
 }
 
 const TTL: Timespec = Timespec { sec: 1, nsec: 0 };
+/// Set of FileTypes this FS is concerned with. Everything else will be filtered out of
+/// directory listings.
+const RELEVANT_FILETYPES: [&'static FileType; 3] = [
+    &FileType::Directory,
+    &FileType::RegularFile,
+    &FileType::Symlink
+];
+
+/// Set of file extensions this FS is concerned with. Everything else will be filtered out
+/// of directory listings.
+const RELEVANT_EXTENSIONS: [&'static str; 2] = [
+    "flac",
+    "mp3"
+];
 
 impl FilesystemMT for Mp3V0Fs {
+
     fn init(&self, _req: RequestInfo) -> ResultEmpty {
         debug!("init");
         Ok(())
@@ -139,8 +155,6 @@ impl FilesystemMT for Mp3V0Fs {
             }
         }
     }
-
-
 
     fn readlink(&self, req: RequestInfo, path: &Path) -> ResultData {
         debug!("readlink: {:?}", path);
@@ -232,6 +246,7 @@ impl FilesystemMT for Mp3V0Fs {
                         0 | _ => {
                             let entry_path = PathBuf::from(path).join(&name);
                             let real_path = self.real_path(&entry_path);
+
                             match libc_wrappers::lstat(real_path) {
                                 Ok(stat64) => mode_to_filetype(stat64.st_mode),
                                 Err(errno) => {
@@ -242,6 +257,21 @@ impl FilesystemMT for Mp3V0Fs {
                             }
                         }
                     };
+
+                    if !RELEVANT_FILETYPES.contains(&&filetype) {
+                        continue;
+                    }
+
+                    if filetype == FileType::RegularFile || filetype == FileType::Symlink {
+                        // TODO dedupe this with the code in match statement above
+                        let entry_path = PathBuf::from(path).join(&name);
+                        let real_path = self.real_path(&entry_path);
+
+                        let file_extension = parse_extension(real_path.to_str().unwrap());
+                        if !RELEVANT_EXTENSIONS.contains(&file_extension) {
+                            continue;
+                        }
+                    }
 
                     entries.push(DirectoryEntry {
                         name,
@@ -305,6 +335,19 @@ impl FilesystemMT for Mp3V0Fs {
 //    }
 }
 
+/// Parse out the file extension given the path to a file.
+fn parse_extension(path: &str) -> &str {
+    let file_name: &str = path.rsplit("/").next().unwrap();
+    let extension_and_name: Vec<&str> = file_name.rsplit(".").collect();
+
+    // Indicates there was no extension
+    if extension_and_name.len() == 1 {
+        return ""
+    }
+
+    return extension_and_name[0]
+}
+
 /// A file that is not closed upon leaving scope.
 struct UnmanagedFile {
     inner: Option<File>,
@@ -355,3 +398,20 @@ impl Seek for UnmanagedFile {
         self.inner.as_ref().unwrap().seek(pos)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::mp3v0fs::parse_extension;
+
+    #[test]
+    fn test_parse_extension() {
+        assert_eq!("flac", parse_extension("/media/music/test.flac"));
+        assert_eq!("mp3", parse_extension("/media/music/test.mp3"));
+        assert_eq!("", parse_extension("/media/music/test"));
+        assert_eq!("flac", parse_extension("test.flac"));
+        assert_eq!("mp3", parse_extension("test.mp3"));
+        assert_eq!("", parse_extension("test"));
+    }
+
+}
+
