@@ -15,6 +15,7 @@ use std::path::Path;
 use std::error::Error;
 use std::io::{Seek, SeekFrom, Read};
 
+mod encode;
 mod libc_extras;
 mod libc_wrappers;
 mod mp3v0fs;
@@ -37,6 +38,7 @@ fn main() {
 
     let filesystem = mp3v0fs::Mp3V0Fs {
         target: args[1].clone(),
+        fds: HashMap::new()
     };
 
     let fuse_args: Vec<&OsStr> = vec![

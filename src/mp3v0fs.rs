@@ -21,9 +21,15 @@ use super::libc_extras::libc;
 use super::libc_wrappers;
 
 use fuse_mt::*;
+use crate::encode::Encoder;
+use claxon::FlacReader;
+use std::borrow::BorrowMut;
+use claxon::input::{BufferedReader, ReadBytes};
 
-pub struct Mp3V0Fs {
+//pub struct Mp3V0Fs<'r, R: std::io::Read> {
+pub struct Mp3V0Fs<'r> {
     pub target: OsString,
+    fds: HashMap<u64, Encoder<&'r mut BufferedReader<File>>>
 }
 
 fn mode_to_filetype(mode: libc::mode_t) -> FileType {
@@ -89,7 +95,7 @@ fn statfs_to_fuse(statfs: libc::statfs) -> Statfs {
     }
 }
 
-impl Mp3V0Fs {
+impl<'r> Mp3V0Fs<'r> {
     fn real_path(&self, partial: &Path) -> OsString {
         PathBuf::from(&self.target)
             .join(partial.strip_prefix("/").unwrap())
@@ -129,7 +135,7 @@ const RELEVANT_EXTENSIONS: [&'static str; 2] = [
     "mp3"
 ];
 
-impl FilesystemMT for Mp3V0Fs {
+impl<'r> FilesystemMT for Mp3V0Fs<'r> {
 
     fn init(&self, _req: RequestInfo) -> ResultEmpty {
         debug!("init");
@@ -180,28 +186,50 @@ impl FilesystemMT for Mp3V0Fs {
     }
 
     fn read(&self, req: RequestInfo, path: &Path, fh: u64, offset: u64, size: u32, result: impl FnOnce(Result<&[u8], libc::c_int>)) {
-        // TODO convert FLAC to mp3 v0 here
-        debug!("read: {:?} {:#x} @ {:#x}", path, size, offset);
-        let mut file = unsafe { UnmanagedFile::new(fh) };
+        // Implementation idea -> store a Map of filename, offset -> Encoder to maintain state between read calls
 
-        let mut data = Vec::<u8>::with_capacity(size as usize);
-        unsafe { data.set_len(size as usize) };
-
-        if let Err(e) = file.seek(SeekFrom::Start(offset)) {
-            error!("seek({:?}, {}): {}", path, offset, e);
-            result(Err(e.raw_os_error().unwrap()));
-            return;
-        }
-        match file.read(&mut data) {
-            Ok(n) => { data.truncate(n); },
-            Err(e) => {
-                error!("read {:?}, {:#x} @ {:#x}: {}", path, size, offset, e);
-                result(Err(e.raw_os_error().unwrap()));
-                return;
-            }
+        // Borrow self as mutable. The definition from FileSystemMT won't allow self to be mutable in the method signature
+        if !self.fds.contains_key(&fh) {
+            let mut flac_reader = match FlacReader::open(path) {
+                Ok(flac_reader) => flac_reader,
+                Err(err) => panic!("Error opening file {}. {}", path.to_str().unwrap(), err)
+            };
+            let mut encoder = Encoder::new(flac_reader);
+            self.fds.insert(fh, encoder);
         }
 
-        result(Ok(&data));
+        let mut encoder = match self.fds.get_mut(&fh) {
+            Some(encoder) => encoder,
+            None => panic!("Failed to read encoder from fds")
+        };
+
+        //TODO handle offset here as well.. would we need to use the UnmanagedFile?
+        let data = encoder.read(size);
+
+        result(Ok(&data))
+
+
+//        debug!("read: {:?} {:#x} @ {:#x}", path, size, offset);
+//        let mut file = unsafe { UnmanagedFile::new(fh) };
+//
+//        let mut data = Vec::<u8>::with_capacity(size as usize);
+//        unsafe { data.set_len(size as usize) };
+//
+//        if let Err(e) = file.seek(SeekFrom::Start(offset)) {
+//            error!("seek({:?}, {}): {}", path, offset, e);
+//            result(Err(e.raw_os_error().unwrap()));
+//            return;
+//        }
+//        match file.read(&mut data) {
+//            Ok(n) => { data.truncate(n); },
+//            Err(e) => {
+//                error!("read {:?}, {:#x} @ {:#x}: {}", path, size, offset, e);
+//                result(Err(e.raw_os_error().unwrap()));
+//                return;
+//            }
+//        }
+//
+//        result(Ok(&data));
     }
 
     fn opendir(&self, req: RequestInfo, path: &Path, flags: u32) -> ResultOpen {
@@ -347,7 +375,6 @@ fn parse_extension(path: &str) -> &str {
 
     return extension_and_name[0]
 }
-
 /// A file that is not closed upon leaving scope.
 struct UnmanagedFile {
     inner: Option<File>,
@@ -414,4 +441,3 @@ mod tests {
     }
 
 }
-
