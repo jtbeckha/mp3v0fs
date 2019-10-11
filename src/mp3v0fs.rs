@@ -1,17 +1,8 @@
-// TODO clean up
-//use fuse_mt::fuse::{Filesystem, Request, ReplyData, ReplyEntry, ReplyAttr, ReplyDirectory};
-//use fuse_mt::{FileType, FileAttr};
-//use fuse_mt::{DirectoryEntry, FilesystemMT, RequestInfo, ResultData, ResultEmpty, ResultEntry,
-//              ResultOpen, ResultReaddir, ResultXattr, Statfs, Xattr};
-use simplelog::{LevelFilter, Config, SimpleLogger};
-use std::collections::HashMap;
-use std::env;
-use std::error::Error;
-use std::ffi::{CStr, CString, OsStr, OsString};
+use std::collections::{HashMap, VecDeque};
+use std::ffi::{CStr, OsStr, OsString};
 use std::fs::File;
 use std::io::{self, Read, Write, Seek, SeekFrom};
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
-use std::os::unix::fs::MetadataExt;
 use std::os::unix::io::{FromRawFd, IntoRawFd};
 use std::path::{Path, PathBuf};
 use std::vec::Vec;
@@ -23,14 +14,9 @@ use super::libc_wrappers;
 use fuse_mt::*;
 use crate::encode::Encoder;
 use claxon::FlacReader;
-use std::borrow::BorrowMut;
-use claxon::input::{BufferedReader, ReadBytes};
-
-//pub struct Mp3V0Fs<'r, R: std::io::Read> {
-pub struct Mp3V0Fs<'r> {
-    pub target: OsString,
-    fds: HashMap<u64, Encoder<&'r mut BufferedReader<File>>>
-}
+use claxon::input::{BufferedReader};
+use std::sync::{Arc, Mutex};
+use lame::Lame;
 
 fn mode_to_filetype(mode: libc::mode_t) -> FileType {
     match mode & libc::S_IFMT {
@@ -95,7 +81,41 @@ fn statfs_to_fuse(statfs: libc::statfs) -> Statfs {
     }
 }
 
+pub struct Mp3V0Fs<'r> {
+    pub target: OsString,
+    lame_wrapper: LameWrapper,
+    fds: Arc<Mutex<HashMap<u64, Encoder<&'r mut BufferedReader<File>>>>>
+}
+
+/// Wrapper to allow Lame to be shared across threads (which should be safe according to
+/// this thread, since we are only using the encoder:
+/// https://sourceforge.net/p/lame/mailman/lame-dev/thread/01b001c40cd8%2408e80870%240c01a8c0%40Stevo03/)
+struct LameWrapper {
+    lame: Arc<Mutex<Lame>>
+}
+
+unsafe impl Send for LameWrapper {}
+unsafe impl Sync for LameWrapper {}
+
 impl<'r> Mp3V0Fs<'r> {
+
+    pub fn new(target: OsString) -> Mp3V0Fs<'r> {
+        let mut lame = match Lame::new() {
+            Some(lame) => lame,
+            None => panic!("Failed to initialize LAME MP3 encoder")
+        };
+
+        lame.set_channels(2);
+        lame.set_quality(0);
+        lame.init_params();
+
+        Mp3V0Fs {
+            target,
+            lame_wrapper: LameWrapper { lame: Arc::new(Mutex::new(lame)) },
+            fds: Arc::new(Mutex::new(HashMap::new()))
+        }
+    }
+
     fn real_path(&self, partial: &Path) -> OsString {
         PathBuf::from(&self.target)
             .join(partial.strip_prefix("/").unwrap())
@@ -117,6 +137,9 @@ impl<'r> Mp3V0Fs<'r> {
             }
         }
     }
+
+    //TODO will a function get around this borrowing issue?
+//    fn insert(&self, Fla)
 }
 
 const TTL: Timespec = Timespec { sec: 1, nsec: 0 };
@@ -188,48 +211,34 @@ impl<'r> FilesystemMT for Mp3V0Fs<'r> {
     fn read(&self, req: RequestInfo, path: &Path, fh: u64, offset: u64, size: u32, result: impl FnOnce(Result<&[u8], libc::c_int>)) {
         // Implementation idea -> store a Map of filename, offset -> Encoder to maintain state between read calls
 
-        // Borrow self as mutable. The definition from FileSystemMT won't allow self to be mutable in the method signature
-        if !self.fds.contains_key(&fh) {
+        // TODO could we only lock this for writes and leave it unlocked when reading?
+        let mut fds = self.fds.lock().unwrap();
+
+        if !fds.contains_key(&fh) {
             let mut flac_reader = match FlacReader::open(path) {
-                Ok(flac_reader) => flac_reader,
+                Ok(flac_reader) => Arc::new(Mutex::new(flac_reader)),
                 Err(err) => panic!("Error opening file {}. {}", path.to_str().unwrap(), err)
             };
-            let mut encoder = Encoder::new(flac_reader);
-            self.fds.insert(fh, encoder);
+
+            let mp3_buffer = VecDeque::new();
+            let encoder = Encoder {
+                flac_samples: flac_reader.lock().unwrap().samples(),
+                mp3_buffer,
+            };
+
+            fds.insert(fh, encoder);
         }
 
-        let mut encoder = match self.fds.get_mut(&fh) {
+        let encoder = match fds.get_mut(&fh) {
             Some(encoder) => encoder,
             None => panic!("Failed to read encoder from fds")
         };
+        let mut lame = self.lame_wrapper.lame.lock().unwrap();
 
         //TODO handle offset here as well.. would we need to use the UnmanagedFile?
-        let data = encoder.read(size);
+        let data = encoder.read(&mut lame, size);
 
         result(Ok(&data))
-
-
-//        debug!("read: {:?} {:#x} @ {:#x}", path, size, offset);
-//        let mut file = unsafe { UnmanagedFile::new(fh) };
-//
-//        let mut data = Vec::<u8>::with_capacity(size as usize);
-//        unsafe { data.set_len(size as usize) };
-//
-//        if let Err(e) = file.seek(SeekFrom::Start(offset)) {
-//            error!("seek({:?}, {}): {}", path, offset, e);
-//            result(Err(e.raw_os_error().unwrap()));
-//            return;
-//        }
-//        match file.read(&mut data) {
-//            Ok(n) => { data.truncate(n); },
-//            Err(e) => {
-//                error!("read {:?}, {:#x} @ {:#x}: {}", path, size, offset, e);
-//                result(Err(e.raw_os_error().unwrap()));
-//                return;
-//            }
-//        }
-//
-//        result(Ok(&data));
     }
 
     fn opendir(&self, req: RequestInfo, path: &Path, flags: u32) -> ResultOpen {

@@ -1,19 +1,14 @@
+//#![warn(missing_docs, bad_style, unused, unused_extern_crates, unused_import_braces, unused_qualifications, missing_debug_implementations)]
 extern crate libc;
 #[macro_use]
 extern crate log;
 extern crate simplelog;
 extern crate time;
 
-use fuse_mt::{FilesystemMT, RequestInfo, ResultData, ResultEmpty, ResultEntry, ResultOpen, ResultReaddir, ResultXattr};
+use fuse_mt::{FilesystemMT};
 use simplelog::{CombinedLogger, LevelFilter, Config, SimpleLogger};
-use std::collections::HashMap;
 use std::env;
 use std::ffi::{OsStr, OsString};
-use std::fs::File;
-use std::os::unix::fs::MetadataExt;
-use std::path::Path;
-use std::error::Error;
-use std::io::{Seek, SeekFrom, Read};
 
 mod encode;
 mod libc_extras;
@@ -36,10 +31,7 @@ fn main() {
         ::std::process::exit(-1);
     }
 
-    let filesystem = mp3v0fs::Mp3V0Fs {
-        target: args[1].clone(),
-        fds: HashMap::new()
-    };
+    let filesystem = mp3v0fs::Mp3V0Fs::new(args[1].clone());
 
     let fuse_args: Vec<&OsStr> = vec![
         &OsStr::new("-o"), &OsStr::new("auto_unmount"),
