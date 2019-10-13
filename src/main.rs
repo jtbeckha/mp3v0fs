@@ -38,6 +38,10 @@ fn main() {
         &OsStr::new("-o"), &OsStr::new("rdonly")
     ];
 
-    fuse_mt::mount(fuse_mt::FuseMT::new(filesystem, 1), &args[2], &fuse_args).unwrap();
+    match fuse_mt::mount(
+        fuse_mt::FuseMT::new(filesystem, 1), &args[2], &fuse_args
+    ) {
+        Ok(fs) => fs,
+        Err(err) => println!("Error occurred {}", err)
+    }
 }
-

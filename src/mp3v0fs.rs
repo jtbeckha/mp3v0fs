@@ -193,13 +193,15 @@ impl FilesystemMT for Mp3V0Fs {
     }
 
     fn read(&self, req: RequestInfo, path: &Path, fh: u64, offset: u64, size: u32, result: impl FnOnce(Result<&[u8], libc::c_int>)) {
-        // Implementation idea -> store a Map of filename, offset -> Encoder to maintain state between read calls
+        debug!{"read: {:?} offset {:?}", path, offset};
+
+        let path = self.real_path(path);
 
         // TODO could we only lock this for writes and leave it unlocked when reading?
         let mut fds = self.fds.lock().unwrap();
 
         if !fds.contains_key(&fh) {
-            let mut flac_reader = match FlacReader::open(path) {
+            let mut flac_reader = match FlacReader::open(path.to_owned()) {
                 Ok(flac_reader) => flac_reader,
                 Err(err) => panic!("Error opening file {}. {}", path.to_str().unwrap(), err)
             };
@@ -217,9 +219,9 @@ impl FilesystemMT for Mp3V0Fs {
             Some(encoder) => encoder,
             None => panic!("Failed to read encoder from fds")
         };
+
         let mut lame = self.lame_wrapper.lame.lock().unwrap();
 
-        //TODO handle offset here as well.. would we need to use the UnmanagedFile?
         let data = encoder.read(&mut lame, size);
 
         result(Ok(&data))
