@@ -17,6 +17,7 @@ use claxon::FlacReader;
 use claxon::input::{BufferedReader};
 use std::sync::{Arc, Mutex};
 use lame::Lame;
+use std::ops::Deref;
 
 fn mode_to_filetype(mode: libc::mode_t) -> FileType {
     match mode & libc::S_IFMT {
@@ -81,10 +82,10 @@ fn statfs_to_fuse(statfs: libc::statfs) -> Statfs {
     }
 }
 
-pub struct Mp3V0Fs<'r> {
+pub struct Mp3V0Fs {
     pub target: OsString,
     lame_wrapper: LameWrapper,
-    fds: Arc<Mutex<HashMap<u64, Encoder<&'r mut BufferedReader<File>>>>>
+    fds: Arc<Mutex<HashMap<u64, Encoder<File>>>>
 }
 
 /// Wrapper to allow Lame to be shared across threads (which should be safe according to
@@ -97,9 +98,9 @@ struct LameWrapper {
 unsafe impl Send for LameWrapper {}
 unsafe impl Sync for LameWrapper {}
 
-impl<'r> Mp3V0Fs<'r> {
+impl Mp3V0Fs {
 
-    pub fn new(target: OsString) -> Mp3V0Fs<'r> {
+    pub fn new(target: OsString) -> Mp3V0Fs {
         let mut lame = match Lame::new() {
             Some(lame) => lame,
             None => panic!("Failed to initialize LAME MP3 encoder")
@@ -158,7 +159,7 @@ const RELEVANT_EXTENSIONS: [&'static str; 2] = [
     "mp3"
 ];
 
-impl<'r> FilesystemMT for Mp3V0Fs<'r> {
+impl FilesystemMT for Mp3V0Fs {
 
     fn init(&self, _req: RequestInfo) -> ResultEmpty {
         debug!("init");
@@ -216,13 +217,13 @@ impl<'r> FilesystemMT for Mp3V0Fs<'r> {
 
         if !fds.contains_key(&fh) {
             let mut flac_reader = match FlacReader::open(path) {
-                Ok(flac_reader) => Arc::new(Mutex::new(flac_reader)),
+                Ok(flac_reader) => flac_reader,
                 Err(err) => panic!("Error opening file {}. {}", path.to_str().unwrap(), err)
             };
 
             let mp3_buffer = VecDeque::new();
             let encoder = Encoder {
-                flac_samples: flac_reader.lock().unwrap().samples(),
+                flac_samples: flac_reader.samples(),
                 mp3_buffer,
             };
 

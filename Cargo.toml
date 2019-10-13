@@ -5,7 +5,7 @@ authors = ["Jared <jared@jaredbeckham.com>"]
 edition = "2018"
 
 [dependencies]
-claxon = "0.4.2"
+claxon = { path = "../claxon", version = "0.4.2"}
 libc = "0.2"
 #fuse = "0.3.1"
 lame-sys = "0.1.2"

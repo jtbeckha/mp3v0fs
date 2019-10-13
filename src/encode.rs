@@ -1,23 +1,17 @@
 use lame::Lame;
 use claxon::{FlacReader, FlacSamples};
 use std::fs::File;
+use std::io;
 use claxon::input::{BufferedReader, ReadBytes};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
-pub struct Encoder<R: ReadBytes> {
-    flac_samples: FlacSamples<R>,
-    mp3_buffer: VecDeque<u8>
+pub struct Encoder<R: io::Read> {
+    pub flac_samples: FlacSamples<BufferedReader<R>>,
+    pub mp3_buffer: VecDeque<u8>
 }
 
-impl<'r> Encoder<&'r mut BufferedReader<File>> {
-//    pub fn new(flac_reader: &mut Arc<Mutex<FlacReader<File>>>) -> Encoder<&'r mut BufferedReader<File>> {
-//        Encoder {
-//            flac_samples: flac_reader.to_owned().lock().unwrap().samples(),
-//            mp3_buffer: VecDeque::new()
-//        }
-//    }
-
+impl Encoder<File> {
     /// Returns a chunk of encoded mp3 v0 data of the requested size.
     /// This functions maintains state about where it is at in the FLAC stream, and will
     /// return the next chunk of encoded mp3 data on subsequent calls.
