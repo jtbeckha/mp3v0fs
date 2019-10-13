@@ -54,20 +54,6 @@ fn stat_to_fuse(stat: libc::stat64) -> FileAttr {
     }
 }
 
-//#[cfg(target_os = "macos")]
-//fn statfs_to_fuse(statfs: libc::statfs) -> Statfs {
-//    Statfs {
-//        blocks: statfs.f_blocks,
-//        bfree: statfs.f_bfree,
-//        bavail: statfs.f_bavail,
-//        files: statfs.f_files,
-//        ffree: statfs.f_ffree,
-//        bsize: statfs.f_bsize as u32,
-//        namelen: 0, // TODO
-//        frsize: 0, // TODO
-//    }
-//}
-
 #[cfg(target_os = "linux")]
 fn statfs_to_fuse(statfs: libc::statfs) -> Statfs {
     Statfs {
@@ -138,9 +124,6 @@ impl Mp3V0Fs {
             }
         }
     }
-
-    //TODO will a function get around this borrowing issue?
-//    fn insert(&self, Fla)
 }
 
 const TTL: Timespec = Timespec { sec: 1, nsec: 0 };
@@ -360,17 +343,6 @@ impl FilesystemMT for Mp3V0Fs {
             Ok(Xattr::Size(nbytes as u32))
         }
     }
-
-//    #[cfg(target_os = "macos")]
-//    fn getxtimes(&self, req: RequestInfo, path: &Path) -> ResultXTimes {
-//        debug!("getxtimes: {:?}", path);
-//        let xtimes = XTimes {
-//            bkuptime: Timespec { sec: 0, nsec: 0 },
-//            crtime:   Timespec { sec: 0, nsec: 0 },
-//        };
-//        Ok(xtimes)
-//
-//    }
 }
 
 /// Parse out the file extension given the path to a file.
@@ -384,56 +356,6 @@ fn parse_extension(path: &str) -> &str {
     }
 
     return extension_and_name[0]
-}
-/// A file that is not closed upon leaving scope.
-struct UnmanagedFile {
-    inner: Option<File>,
-}
-
-impl UnmanagedFile {
-    unsafe fn new(fd: u64) -> UnmanagedFile {
-        UnmanagedFile {
-            inner: Some(File::from_raw_fd(fd as i32))
-        }
-    }
-    fn sync_all(&self) -> io::Result<()> {
-        self.inner.as_ref().unwrap().sync_all()
-    }
-    fn sync_data(&self) -> io::Result<()> {
-        self.inner.as_ref().unwrap().sync_data()
-    }
-}
-
-impl Drop for UnmanagedFile {
-    fn drop(&mut self) {
-        // Release control of the file descriptor so it is not closed.
-        let file = self.inner.take().unwrap();
-        file.into_raw_fd();
-    }
-}
-
-impl Read for UnmanagedFile {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        self.inner.as_ref().unwrap().read(buf)
-    }
-    fn read_to_end(&mut self, buf: &mut Vec<u8>) -> io::Result<usize> {
-        self.inner.as_ref().unwrap().read_to_end(buf)
-    }
-}
-
-impl Write for UnmanagedFile {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.inner.as_ref().unwrap().write(buf)
-    }
-    fn flush(&mut self) -> io::Result<()> {
-        self.inner.as_ref().unwrap().flush()
-    }
-}
-
-impl Seek for UnmanagedFile {
-    fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
-        self.inner.as_ref().unwrap().seek(pos)
-    }
 }
 
 #[cfg(test)]
