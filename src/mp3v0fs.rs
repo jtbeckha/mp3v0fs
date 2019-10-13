@@ -224,6 +224,8 @@ impl FilesystemMT for Mp3V0Fs {
 
         let data = encoder.read(&mut lame, size);
 
+        //TODO drop the encoder once we reach EOF or if some error occurs
+
         result(Ok(&data))
     }
 

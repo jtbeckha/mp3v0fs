@@ -12,12 +12,13 @@ pub struct Encoder<R: io::Read> {
 }
 
 impl Encoder<File> {
+
     /// Returns a chunk of encoded mp3 v0 data of the requested size.
     /// This functions maintains state about where it is at in the FLAC stream, and will
     /// return the next chunk of encoded mp3 data on subsequent calls.
     pub fn read(&mut self, lame: &mut Lame, size: u32) -> Vec<u8> {
         while self.mp3_buffer.len() < size as usize {
-            //TODO check for EOF as well
+            //TODO check for EOF
             self.encode(lame, size as usize);
         }
 
@@ -36,25 +37,30 @@ impl Encoder<File> {
         let mut pcm_right: Vec<i16> = vec![0; size];
 
         for i in 0..size*2 {
-            if let Some(l_frame) = self.flac_samples.next() {
-                let l_frame = l_frame.unwrap();
-                //FIXME what to do about lossy conversion i32 -> i16?
-                pcm_left.push(l_frame as i16);
-            } else {
-                panic!("Error reading FLAC");
-            }
+            let l_frame = self.flac_samples.next().expect("Error decoding FLAC sample").unwrap();
+            // The FLAC decoder returns samples in a signed 32-bit format, here we scaled that
+            // down to a signed 16-bit which is expected by LAME
+            let scaled_l_frame = (l_frame >> 16) as i16;
+            pcm_left.push(scaled_l_frame);
 
-            if let Some(r_frame) = self.flac_samples.next() {
-                let r_frame = r_frame.unwrap();
-                //FIXME what to do about lossy conversion i32 -> i16?
-                pcm_right.push(r_frame as i16);
-            } else {
-                panic!("Error reading FLAC");
-            }
+            let r_frame = self.flac_samples.next().expect("Error decoding FLAC sample").unwrap();
+            // The FLAC decoder returns samples in a signed 32-bit format, here we scaled that
+            // down to a signed 16-bit which is expected by LAME
+            let scaled_r_frame = (r_frame >> 16) as i16;
+            pcm_right.push(scaled_r_frame);
         }
 
-        let mut lame_buffer = vec![0; size];
-        lame.encode(pcm_left.as_slice(), pcm_right.as_slice(), &mut lame_buffer);
+        // I have no idea what this size calculation is, shamelessly copied from mp3fs. May or
+        // not may reasonable for v0 encodings TODO learn about this
+        let mut lame_buffer = vec![0; 5*size/4 + 7200];
+        let output_length = match lame.encode(
+            pcm_left.as_slice(), pcm_right.as_slice(), &mut lame_buffer
+        ) {
+            Ok(output_length) => output_length,
+            Err(err) => panic!("Unexpected error encoding PCM data: {:?}", err),
+        };
+        lame_buffer.resize(output_length, 0);
+
         for byte in lame_buffer {
             self.mp3_buffer.push_back(byte);
         }
