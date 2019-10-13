@@ -22,20 +22,23 @@ impl Encoder<File> {
             self.encode(lame, size as usize);
         }
 
-        let mut encoded_mp3_chunk: Vec<u8> = vec![0; size as usize];
+        let mut encoded_mp3_chunk: Vec<u8> = Vec::with_capacity(size as usize);
         for _i in 0..size {
-            encoded_mp3_chunk.push(self.mp3_buffer.pop_front().unwrap());
+            if !self.mp3_buffer.is_empty() {
+                encoded_mp3_chunk.push(self.mp3_buffer.pop_front().unwrap());
+            }
         }
 
-        return encoded_mp3_chunk.to_owned();
+        encoded_mp3_chunk
     }
 
     fn encode(&mut self, lame: &mut Lame, size: usize) {
         //TODO figure out size calculation? Probably need some kind of lazily calculated circular
         //buffer that the FS can pull from for the mp3 data
-        let mut pcm_left: Vec<i16> = vec![0; size];
-        let mut pcm_right: Vec<i16> = vec![0; size];
+        let mut pcm_left: Vec<i16> = Vec::with_capacity(size);
+        let mut pcm_right: Vec<i16> = Vec::with_capacity(size);
 
+        //FIXME Make this cleaner, iterates right past EOF right now
         for i in 0..size*2 {
             let l_frame = self.flac_samples.next().expect("Error decoding FLAC sample").unwrap();
             // The FLAC decoder returns samples in a signed 32-bit format, here we scaled that
@@ -50,9 +53,11 @@ impl Encoder<File> {
             pcm_right.push(scaled_r_frame);
         }
 
+        let sample_count = pcm_right.len();
+
         // I have no idea what this size calculation is, shamelessly copied from mp3fs. May or
         // not may reasonable for v0 encodings TODO learn about this
-        let mut lame_buffer = vec![0; 5*size/4 + 7200];
+        let mut lame_buffer = Vec::with_capacity(5*sample_count/4 + 7200);
         let output_length = match lame.encode(
             pcm_left.as_slice(), pcm_right.as_slice(), &mut lame_buffer
         ) {
