@@ -5,13 +5,53 @@ use std::io;
 use claxon::input::{BufferedReader, ReadBytes};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
+use claxon::metadata::Tags;
+use crate::tags;
+use id3::{Tag, Version};
+use std::io::{BufWriter, Cursor, Read, Write};
 
 pub struct Encoder<R: io::Read> {
-    pub flac_samples: FlacSamples<BufferedReader<R>>,
-    pub mp3_buffer: VecDeque<u8>
+    flac_samples: FlacSamples<BufferedReader<R>>,
+    mp3_buffer: VecDeque<u8>
 }
 
 impl Encoder<File> {
+
+    pub fn new(flac_reader: FlacReader<File>, size: usize) -> Encoder<File> {
+        let flac_tags = flac_reader.tags();
+        let mut mp3_tag = Tag::new();
+        //TODO collect FLAC tags instead and store as struct member, move mp3 translation
+        //and stream injection login into init function
+        for tag in flac_tags {
+            match tags::translate_vorbis_comment_to_id3(
+                &String::from(tag.0), &String::from(tag.1)
+            ) {
+                Some(frame) => mp3_tag.add_frame(frame),
+                None => None
+            };
+        }
+
+        let mut tag_buffer: Cursor<Vec<u8>> = Cursor::new(Vec::with_capacity(2048));
+        mp3_tag.write_to(&mut tag_buffer, Version::Id3v23);
+
+        let mut mp3_buffer: VecDeque<u8> = VecDeque::with_capacity(size * 2);
+        for byte in tag_buffer.get_ref() {
+            mp3_buffer.push_back(byte.clone());
+        }
+
+        let mut encoder = Encoder {
+            flac_samples: flac_reader.samples(),
+            mp3_buffer
+        };
+        encoder
+    }
+
+
+//    /// Handles work that needs to be done before PCM data starts being encoded,
+//    /// e.g. injecting tag data into the stream.
+//    fn initialize(&self, mp3_tag: Tag) {
+//        mp3_tag.write_to(self.mp3_buffer.clone(), Version::Id3v23);
+//    }
 
     /// Returns a chunk of encoded mp3 v0 data of the requested size.
     /// This functions maintains state about where it is at in the FLAC stream, and will

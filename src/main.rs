@@ -14,6 +14,7 @@ mod encode;
 mod libc_extras;
 mod libc_wrappers;
 mod mp3v0fs;
+mod tags;
 
 fn main() {
     // Initialize logging

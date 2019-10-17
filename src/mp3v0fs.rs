@@ -206,11 +206,7 @@ impl FilesystemMT for Mp3V0Fs {
                 Err(err) => panic!("Error opening file {}. {}", path.to_str().unwrap(), err)
             };
 
-            let mp3_buffer = VecDeque::with_capacity((size * 2) as usize);
-            let encoder = Encoder {
-                flac_samples: flac_reader.samples(),
-                mp3_buffer,
-            };
+            let encoder = Encoder::new(flac_reader, size as usize);
 
             fds.insert(fh, encoder);
         }
