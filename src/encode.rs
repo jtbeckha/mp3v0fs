@@ -15,13 +15,14 @@ pub struct Encoder<R: io::Read> {
     mp3_buffer: VecDeque<u8>
 }
 
+/// Encoder for a single file.
 impl Encoder<File> {
 
     pub fn new(flac_reader: FlacReader<File>, size: usize) -> Encoder<File> {
         let flac_tags = flac_reader.tags();
         let mut mp3_tag = Tag::new();
         //TODO collect FLAC tags instead and store as struct member, move mp3 translation
-        //and stream injection login into init function
+        //and stream injection logic into init function
         for tag in flac_tags {
             match tags::translate_vorbis_comment_to_id3(
                 &String::from(tag.0), &String::from(tag.1)
@@ -58,8 +59,10 @@ impl Encoder<File> {
     /// return the next chunk of encoded mp3 data on subsequent calls.
     pub fn read(&mut self, lame: &mut Lame, size: u32) -> Vec<u8> {
         while self.mp3_buffer.len() < size as usize {
-            //TODO check for EOF
-            self.encode(lame, size as usize);
+            let encoded_length = self.encode(lame, size as usize);
+            if encoded_length == 0 {
+                break;
+            }
         }
 
         let mut encoded_mp3_chunk: Vec<u8> = Vec::with_capacity(size as usize);
@@ -72,24 +75,33 @@ impl Encoder<File> {
         encoded_mp3_chunk
     }
 
-    fn encode(&mut self, lame: &mut Lame, size: usize) {
+    /// Encodes the next chunk of FLAC data to MP3 V0.
+    /// Returns the length of encoded data written to the mp3_buffer.
+    fn encode(&mut self, lame: &mut Lame, size: usize) -> usize {
         //TODO figure out size calculation? Probably need some kind of lazily calculated circular
         //buffer that the FS can pull from for the mp3 data
         let mut pcm_left: Vec<i16> = Vec::with_capacity(size);
         let mut pcm_right: Vec<i16> = Vec::with_capacity(size);
 
-        //FIXME Make this cleaner, iterates right past EOF right now
         for i in 0..size*2 {
-            let l_frame = self.flac_samples.next().expect("Error decoding FLAC sample").unwrap();
-            // The FLAC decoder returns samples in a signed 32-bit format, here we scaled that
-            // down to a signed 16-bit which is expected by LAME
-            let scaled_l_frame = (l_frame >> 16) as i16;
+            let l_frame = match self.flac_samples.next() {
+                Some(l_frame) => l_frame.unwrap(),
+                None => break
+            };
+            // The FLAC decoder returns sampled in a signed 32-bit format. If we ignore 24-bit FLACs
+            // for now, we can safely just convert that to an i16
+            // TODO support 24-bit FLAC
+            let scaled_l_frame = l_frame as i16;
             pcm_left.push(scaled_l_frame);
 
-            let r_frame = self.flac_samples.next().expect("Error decoding FLAC sample").unwrap();
-            // The FLAC decoder returns samples in a signed 32-bit format, here we scaled that
-            // down to a signed 16-bit which is expected by LAME
-            let scaled_r_frame = (r_frame >> 16) as i16;
+            let r_frame = match self.flac_samples.next() {
+                Some(r_frame) => r_frame.unwrap(),
+                None => break
+            };
+            // The FLAC decoder returns sampled in a signed 32-bit format. If we ignore 24-bit FLACs
+            // for now, we can safely just convert that to an i16
+            // TODO support 24-bit FLAC
+            let scaled_r_frame = r_frame as i16;
             pcm_right.push(scaled_r_frame);
         }
 
@@ -97,17 +109,19 @@ impl Encoder<File> {
 
         // I have no idea what this size calculation is, shamelessly copied from mp3fs. May or
         // not may reasonable for v0 encodings TODO learn about this
-        let mut lame_buffer = Vec::with_capacity(5*sample_count/4 + 7200);
+        let mut lame_buffer = vec![0; 5*sample_count/4 + 7200];
         let output_length = match lame.encode(
             pcm_left.as_slice(), pcm_right.as_slice(), &mut lame_buffer
         ) {
             Ok(output_length) => output_length,
             Err(err) => panic!("Unexpected error encoding PCM data: {:?}", err),
         };
-        lame_buffer.resize(output_length, 0);
+        lame_buffer.truncate(output_length);
 
         for byte in lame_buffer {
             self.mp3_buffer.push_back(byte);
         }
+
+        output_length
     }
 }
