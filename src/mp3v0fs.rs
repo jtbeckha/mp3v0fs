@@ -1,72 +1,32 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::ffi::{CStr, OsStr, OsString};
 use std::fs::File;
-use std::io::{self, Read, Write, Seek, SeekFrom};
+use std::io;
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
-use std::os::unix::io::{FromRawFd, IntoRawFd};
 use std::path::{Path, PathBuf};
 use std::vec::Vec;
 use time::Timespec;
 
-use super::libc_extras::libc;
-use super::libc_wrappers;
+use super::lib::libc_extras::libc;
+use super::lib::libc_wrappers;
 
 use fuse_mt::*;
 use crate::encode::Encoder;
 use claxon::FlacReader;
-use claxon::input::{BufferedReader};
 use std::sync::{Arc, Mutex};
 use lame::Lame;
-use std::ops::Deref;
 
-fn mode_to_filetype(mode: libc::mode_t) -> FileType {
-    match mode & libc::S_IFMT {
-        libc::S_IFDIR => FileType::Directory,
-        libc::S_IFREG => FileType::RegularFile,
-        libc::S_IFLNK => FileType::Symlink,
-        libc::S_IFBLK => FileType::BlockDevice,
-        libc::S_IFCHR => FileType::CharDevice,
-        libc::S_IFIFO  => FileType::NamedPipe,
-        libc::S_IFSOCK => FileType::Socket,
-        _ => { panic!("unknown file type"); }
-    }
-}
+const TTL: Timespec = Timespec { sec: 1, nsec: 0 };
 
-fn stat_to_fuse(stat: libc::stat64) -> FileAttr {
-    // st_mode encodes both the kind and the permissions
-    let kind = mode_to_filetype(stat.st_mode);
-    let perm = (stat.st_mode & 0o7777) as u16;
+/// Set of FileTypes this FS is concerned with. Everything else will be filtered out of
+/// directory listings.
+const RELEVANT_FILETYPES: [&'static FileType; 3] = [
+    &FileType::Directory, &FileType::RegularFile, &FileType::Symlink
+];
 
-    FileAttr {
-        size: stat.st_size as u64,
-        blocks: stat.st_blocks as u64,
-        atime: Timespec { sec: stat.st_atime as i64, nsec: stat.st_atime_nsec as i32 },
-        mtime: Timespec { sec: stat.st_mtime as i64, nsec: stat.st_mtime_nsec as i32 },
-        ctime: Timespec { sec: stat.st_ctime as i64, nsec: stat.st_ctime_nsec as i32 },
-        crtime: Timespec { sec: 0, nsec: 0 },
-        kind,
-        perm,
-        nlink: stat.st_nlink as u32,
-        uid: stat.st_uid,
-        gid: stat.st_gid,
-        rdev: stat.st_rdev as u32,
-        flags: 0,
-    }
-}
-
-#[cfg(target_os = "linux")]
-fn statfs_to_fuse(statfs: libc::statfs) -> Statfs {
-    Statfs {
-        blocks: statfs.f_blocks as u64,
-        bfree: statfs.f_bfree as u64,
-        bavail: statfs.f_bavail as u64,
-        files: statfs.f_files as u64,
-        ffree: statfs.f_ffree as u64,
-        bsize: statfs.f_bsize as u32,
-        namelen: statfs.f_namelen as u32,
-        frsize: statfs.f_frsize as u32,
-    }
-}
+/// Set of file extensions this FS is concerned with. Everything else will be filtered out
+/// of directory listings.
+const RELEVANT_EXTENSIONS: [&'static str; 2] = ["flac", "mp3"];
 
 pub struct Mp3V0Fs {
     pub target: OsString,
@@ -80,7 +40,6 @@ pub struct Mp3V0Fs {
 struct LameWrapper {
     lame: Arc<Mutex<Lame>>
 }
-
 unsafe impl Send for LameWrapper {}
 unsafe impl Sync for LameWrapper {}
 
@@ -92,9 +51,9 @@ impl Mp3V0Fs {
             None => panic!("Failed to initialize LAME MP3 encoder")
         };
 
-        lame.set_channels(2);
-        lame.set_quality(0);
-        lame.init_params();
+        lame.set_channels(2).expect("Failed to call lame.set_channels()");
+        lame.set_quality(0).expect("Failed to call lame.set_quality()");
+        lame.init_params().expect("Failed to call lame.init_params()");
 
         Mp3V0Fs {
             target,
@@ -126,22 +85,6 @@ impl Mp3V0Fs {
     }
 }
 
-const TTL: Timespec = Timespec { sec: 1, nsec: 0 };
-/// Set of FileTypes this FS is concerned with. Everything else will be filtered out of
-/// directory listings.
-const RELEVANT_FILETYPES: [&'static FileType; 3] = [
-    &FileType::Directory,
-    &FileType::RegularFile,
-    &FileType::Symlink
-];
-
-/// Set of file extensions this FS is concerned with. Everything else will be filtered out
-/// of directory listings.
-const RELEVANT_EXTENSIONS: [&'static str; 2] = [
-    "flac",
-    "mp3"
-];
-
 impl FilesystemMT for Mp3V0Fs {
 
     fn init(&self, _req: RequestInfo) -> ResultEmpty {
@@ -153,7 +96,7 @@ impl FilesystemMT for Mp3V0Fs {
         debug!("destroy");
     }
 
-    fn getattr(&self, req: RequestInfo, path: &Path, fh: Option<u64>) -> ResultEntry {
+    fn getattr(&self, _req: RequestInfo, path: &Path, fh: Option<u64>) -> ResultEntry {
         debug!("getattr: {:?}", path);
 
         if let Some(fh) = fh {
@@ -169,7 +112,7 @@ impl FilesystemMT for Mp3V0Fs {
         }
     }
 
-    fn readlink(&self, req: RequestInfo, path: &Path) -> ResultData {
+    fn readlink(&self, _req: RequestInfo, path: &Path) -> ResultData {
         debug!("readlink: {:?}", path);
 
         let real = self.real_path(path);
@@ -179,7 +122,7 @@ impl FilesystemMT for Mp3V0Fs {
         }
     }
 
-    fn open(&self, req: RequestInfo, path: &Path, flags: u32) -> ResultOpen {
+    fn open(&self, _req: RequestInfo, path: &Path, flags: u32) -> ResultOpen {
         debug!("open: {:?} flags={:#x}", path, flags);
 
         let real = self.real_path(path);
@@ -192,7 +135,7 @@ impl FilesystemMT for Mp3V0Fs {
         }
     }
 
-    fn read(&self, req: RequestInfo, path: &Path, fh: u64, offset: u64, size: u32, result: impl FnOnce(Result<&[u8], libc::c_int>)) {
+    fn read(&self, _req: RequestInfo, path: &Path, fh: u64, offset: u64, size: u32, result: impl FnOnce(Result<&[u8], libc::c_int>)) {
         debug!{"read: {:?} offset {:?}", path, offset};
 
         let path = self.real_path(path);
@@ -201,7 +144,7 @@ impl FilesystemMT for Mp3V0Fs {
         let mut fds = self.fds.lock().unwrap();
 
         if !fds.contains_key(&fh) {
-            let mut flac_reader = match FlacReader::open(path.to_owned()) {
+            let  flac_reader = match FlacReader::open(path.to_owned()) {
                 Ok(flac_reader) => flac_reader,
                 Err(err) => panic!("Error opening file {}. {}", path.to_str().unwrap(), err)
             };
@@ -225,7 +168,7 @@ impl FilesystemMT for Mp3V0Fs {
         result(Ok(&data))
     }
 
-    fn opendir(&self, req: RequestInfo, path: &Path, flags: u32) -> ResultOpen {
+    fn opendir(&self, _req: RequestInfo, path: &Path, flags: u32) -> ResultOpen {
         let real = self.real_path(path);
         debug!("opendir: {:?} (flags = {:#o})", real, flags);
         match libc_wrappers::opendir(real) {
@@ -238,7 +181,7 @@ impl FilesystemMT for Mp3V0Fs {
         }
     }
 
-    fn readdir(&self, req: RequestInfo, path: &Path, fh: u64) -> ResultReaddir {
+    fn readdir(&self, _req: RequestInfo, path: &Path, fh: u64) -> ResultReaddir {
         debug!("readdir: {:?}", path);
         let mut entries: Vec<DirectoryEntry> = vec![];
 
@@ -310,7 +253,7 @@ impl FilesystemMT for Mp3V0Fs {
         Ok(entries)
     }
 
-    fn getxattr(&self, req: RequestInfo, path: &Path, name: &OsStr, size: u32) -> ResultXattr {
+    fn getxattr(&self, _req: RequestInfo, path: &Path, name: &OsStr, size: u32) -> ResultXattr {
         debug!("getxattr: {:?} {:?} {}", path, name, size);
 
         let real = self.real_path(path);
@@ -327,7 +270,7 @@ impl FilesystemMT for Mp3V0Fs {
         }
     }
 
-    fn listxattr(&self, req: RequestInfo, path: &Path, size: u32) -> ResultXattr {
+    fn listxattr(&self, _req: RequestInfo, path: &Path, size: u32) -> ResultXattr {
         debug!("listxattr: {:?}", path);
 
         let real = self.real_path(path);
@@ -342,6 +285,41 @@ impl FilesystemMT for Mp3V0Fs {
             let nbytes = libc_wrappers::llistxattr(real, &mut[])?;
             Ok(Xattr::Size(nbytes as u32))
         }
+    }
+}
+
+fn mode_to_filetype(mode: libc::mode_t) -> FileType {
+    match mode & libc::S_IFMT {
+        libc::S_IFDIR => FileType::Directory,
+        libc::S_IFREG => FileType::RegularFile,
+        libc::S_IFLNK => FileType::Symlink,
+        libc::S_IFBLK => FileType::BlockDevice,
+        libc::S_IFCHR => FileType::CharDevice,
+        libc::S_IFIFO  => FileType::NamedPipe,
+        libc::S_IFSOCK => FileType::Socket,
+        _ => { panic!("unknown file type"); }
+    }
+}
+
+fn stat_to_fuse(stat: libc::stat64) -> FileAttr {
+    // st_mode encodes both the kind and the permissions
+    let kind = mode_to_filetype(stat.st_mode);
+    let perm = (stat.st_mode & 0o7777) as u16;
+
+    FileAttr {
+        size: stat.st_size as u64,
+        blocks: stat.st_blocks as u64,
+        atime: Timespec { sec: stat.st_atime as i64, nsec: stat.st_atime_nsec as i32 },
+        mtime: Timespec { sec: stat.st_mtime as i64, nsec: stat.st_mtime_nsec as i32 },
+        ctime: Timespec { sec: stat.st_ctime as i64, nsec: stat.st_ctime_nsec as i32 },
+        crtime: Timespec { sec: 0, nsec: 0 },
+        kind,
+        perm,
+        nlink: stat.st_nlink as u32,
+        uid: stat.st_uid,
+        gid: stat.st_gid,
+        rdev: stat.st_rdev as u32,
+        flags: 0,
     }
 }
 

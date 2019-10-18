@@ -5,14 +5,12 @@ extern crate log;
 extern crate simplelog;
 extern crate time;
 
-use fuse_mt::{FilesystemMT};
 use simplelog::{CombinedLogger, LevelFilter, Config, SimpleLogger};
 use std::env;
 use std::ffi::{OsStr, OsString};
 
 mod encode;
-mod libc_extras;
-mod libc_wrappers;
+mod lib;
 mod mp3v0fs;
 mod tags;
 

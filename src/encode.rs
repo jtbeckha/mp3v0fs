@@ -2,13 +2,11 @@ use lame::Lame;
 use claxon::{FlacReader, FlacSamples};
 use std::fs::File;
 use std::io;
-use claxon::input::{BufferedReader, ReadBytes};
+use claxon::input::BufferedReader;
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
-use claxon::metadata::Tags;
 use crate::tags;
 use id3::{Tag, Version};
-use std::io::{BufWriter, Cursor, Read, Write};
+use std::io::Cursor;
 
 pub struct Encoder<R: io::Read> {
     flac_samples: FlacSamples<BufferedReader<R>>,
@@ -33,14 +31,17 @@ impl Encoder<File> {
         }
 
         let mut tag_buffer: Cursor<Vec<u8>> = Cursor::new(Vec::with_capacity(2048));
-        mp3_tag.write_to(&mut tag_buffer, Version::Id3v23);
+        match mp3_tag.write_to(&mut tag_buffer, Version::Id3v23) {
+            Ok(()) => (),
+            Err(e) => error!("Error writing tags, description={}", e.description)
+        }
 
         let mut mp3_buffer: VecDeque<u8> = VecDeque::with_capacity(size * 2);
         for byte in tag_buffer.get_ref() {
             mp3_buffer.push_back(byte.clone());
         }
 
-        let mut encoder = Encoder {
+        let encoder = Encoder {
             flac_samples: flac_reader.samples(),
             mp3_buffer
         };
@@ -83,7 +84,7 @@ impl Encoder<File> {
         let mut pcm_left: Vec<i16> = Vec::with_capacity(size);
         let mut pcm_right: Vec<i16> = Vec::with_capacity(size);
 
-        for i in 0..size*2 {
+        for _i in 0..size*2 {
             let l_frame = match self.flac_samples.next() {
                 Some(l_frame) => l_frame.unwrap(),
                 None => break
