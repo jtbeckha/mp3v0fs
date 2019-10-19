@@ -42,7 +42,7 @@ impl Encoder<File> {
         }
 
         let encoder = Encoder {
-            flac_samples: flac_reader.samples(),
+            flac_samples: flac_reader.samples_owned(),
             mp3_buffer
         };
         encoder
