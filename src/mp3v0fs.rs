@@ -240,7 +240,7 @@ impl FilesystemMT for Mp3V0Fs {
                         let real_path = self.real_path(&entry_path);
 
                         let file_extension = parse_extension(real_path.to_str().unwrap());
-                        let fuse_file_name = match file_extension {
+                        let fuse_file_name = match file_extension.as_ref() {
                             FLAC => OsString::from(replace_extension(name.to_str().unwrap(), MP3)),
                             MP3 => name,
                             // Filter out any filetypes we don't care about
@@ -335,22 +335,23 @@ fn stat_to_fuse(stat: libc::stat64) -> FileAttr {
 }
 
 /// Parse out the file extension given the path to a file.
-fn parse_extension(path: &str) -> &str {
-    let file_name: &str = path.rsplit("/").next().unwrap();
-    let extension_and_name: Vec<&str> = file_name.rsplit(".").collect();
-
-    // Indicates there was no extension
-    if extension_and_name.len() == 1 {
-        return ""
+fn parse_extension(path: &str) -> String {
+    let path_components: Vec<&str> = path.split("/").collect();
+    if path_components.len() == 0 {
+        return String::from("")
     }
+    let file_name = path_components[path_components.len() - 1];
 
-    return extension_and_name[0]
+    let mut name_and_extension: Vec<&str> = file_name.split(".").collect();
+    match name_and_extension.len() {
+        0|1 => String::from(""),
+        _ => String::from(name_and_extension[name_and_extension.len() - 1])
+    }
 }
 
 /// Replaces the extension of a file with the provided replacement
 fn replace_extension(path: &str, replacement: &str) -> String {
     let path_components: Vec<&str> = path.split("/").collect();
-
     if path_components.len() == 0 {
         return String::from("")
     }
@@ -374,12 +375,16 @@ mod tests {
 
     #[test]
     fn test_parse_extension() {
-        assert_eq!("flac", parse_extension("/media/music/test.flac"));
-        assert_eq!("mp3", parse_extension("/media/music/test.mp3"));
+        assert_eq!("", parse_extension(""));
+        assert_eq!("", parse_extension("test"));
+        assert_eq!("", parse_extension("./test"));
         assert_eq!("", parse_extension("/media/music/test"));
         assert_eq!("flac", parse_extension("test.flac"));
         assert_eq!("mp3", parse_extension("test.mp3"));
-        assert_eq!("", parse_extension("test"));
+        assert_eq!("flac", parse_extension("./test.flac"));
+        assert_eq!("mp3", parse_extension("./test.mp3"));
+        assert_eq!("flac", parse_extension("/media/music/test.flac"));
+        assert_eq!("mp3", parse_extension("/media/music/test.mp3"));
     }
 
     #[test]
@@ -388,9 +393,11 @@ mod tests {
         assert_eq!("test", replace_extension("test", MP3));
         assert_eq!("test", replace_extension("./test", MP3));
         assert_eq!("test", replace_extension("/media/music/test", MP3));
-        assert_eq!("test.mp3", replace_extension("/media/music/test.flac", MP3));
-        assert_eq!("test.mp3", replace_extension("/media/music/test.mp3", MP3));
         assert_eq!("test.mp3", replace_extension("test.flac", MP3));
         assert_eq!("test.mp3", replace_extension("test.mp3", MP3));
+        assert_eq!("test.mp3", replace_extension("./test.flac", MP3));
+        assert_eq!("test.mp3", replace_extension("./test.mp3", MP3));
+        assert_eq!("test.mp3", replace_extension("/media/music/test.flac", MP3));
+        assert_eq!("test.mp3", replace_extension("/media/music/test.mp3", MP3));
     }
 }
