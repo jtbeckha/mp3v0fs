@@ -143,14 +143,26 @@ impl FilesystemMT for Mp3V0Fs {
         }
     }
 
+    fn release(&self, _req: RequestInfo, path: &Path, fh: u64, _flags: u32, _lock_owner: u64, _flush: bool) -> ResultEmpty {
+        debug!("release: {:?}", path);
+
+        let mut fds = self.fds.lock().unwrap();
+        if fds.contains_key(&fh) {
+            debug!("removing fh={} from fds", fh);
+            fds.remove(&fh);
+        }
+
+        Ok(())
+    }
+
     fn read(&self, _req: RequestInfo, path: &Path, fh: u64, offset: u64, size: u32, result: impl FnOnce(Result<&[u8], libc::c_int>)) {
         debug!{"read: {:?} offset {:?}", path, offset};
 
         let path = self.real_path(path);
 
-        // TODO could we only lock this for writes and leave it unlocked when reading?
         let mut fds = self.fds.lock().unwrap();
 
+        // TODO move this to open(), also block calls to open a file that is already open
         if !fds.contains_key(&fh) {
             let  flac_reader = match FlacReader::open(path.to_owned()) {
                 Ok(flac_reader) => flac_reader,
@@ -159,6 +171,7 @@ impl FilesystemMT for Mp3V0Fs {
 
             let encoder = Encoder::new(flac_reader, size as usize);
 
+            debug!("adding fh={} to fds", fh);
             fds.insert(fh, encoder);
         }
 
@@ -203,6 +216,8 @@ impl FilesystemMT for Mp3V0Fs {
                 Ok(Some(entry)) => {
                     let name_c = unsafe { CStr::from_ptr(entry.d_name.as_ptr()) };
                     let name = OsStr::from_bytes(name_c.to_bytes()).to_owned();
+                    let entry_path = PathBuf::from(path).join(&name);
+                    let real_path = self.real_path(&entry_path);
 
                     let filetype = match entry.d_type {
                         libc::DT_DIR => FileType::Directory,
@@ -215,11 +230,8 @@ impl FilesystemMT for Mp3V0Fs {
                             warn!("FUSE doesn't support Socket file type; translating to NamedPipe instead.");
                             FileType::NamedPipe
                         },
-                        0 | _ => {
-                            let entry_path = PathBuf::from(path).join(&name);
-                            let real_path = self.real_path(&entry_path);
-
-                            match libc_wrappers::lstat(real_path) {
+                        _ => {
+                            match libc_wrappers::lstat(real_path.clone()) {
                                 Ok(stat64) => mode_to_filetype(stat64.st_mode),
                                 Err(errno) => {
                                     let ioerr = io::Error::from_raw_os_error(errno);
@@ -234,29 +246,24 @@ impl FilesystemMT for Mp3V0Fs {
                         continue;
                     }
 
-                    if filetype == FileType::RegularFile || filetype == FileType::Symlink {
-                        // TODO dedupe this with the code in match statement above
-                        let entry_path = PathBuf::from(path).join(&name);
-                        let real_path = self.real_path(&entry_path);
+                    let fuse_file_name: OsString = match filetype {
+                        FileType::RegularFile | FileType::Symlink => {
+                            let file_extension = parse_extension(real_path.to_str().unwrap());
+                            match file_extension.as_ref() {
+                                FLAC => OsString::from(replace_extension(name.to_str().unwrap(), MP3)),
+                                // TODO implement passthrough reads for pre-existing MP3s
+                                // MP3 => name,
+                                // Filter out any filetypes we don't care about
+                                _ => continue
+                            }
+                        },
+                        _ => name
+                    };
 
-                        let file_extension = parse_extension(real_path.to_str().unwrap());
-                        let fuse_file_name = match file_extension.as_ref() {
-                            FLAC => OsString::from(replace_extension(name.to_str().unwrap(), MP3)),
-                            MP3 => name,
-                            // Filter out any filetypes we don't care about
-                            _ => continue
-                        };
-
-                        entries.push(DirectoryEntry {
-                            name: fuse_file_name,
-                            kind: filetype
-                        })
-                    } else if filetype == FileType::Directory {
-                        entries.push(DirectoryEntry {
-                            name,
-                            kind: filetype
-                        })
-                    }
+                    entries.push(DirectoryEntry {
+                        name: fuse_file_name,
+                        kind: filetype
+                    });
                 },
                 Ok(None) => { break; },
                 Err(e) => {
@@ -349,7 +356,7 @@ fn parse_extension(path: &str) -> String {
 
     let mut name_and_extension: Vec<&str> = file_name.split(".").collect();
     match name_and_extension.len() {
-        0|1 => String::from(""),
+        0 | 1 => String::from(""),
         _ => String::from(name_and_extension[name_and_extension.len() - 1])
     }
 }
