@@ -16,6 +16,8 @@ use claxon::FlacReader;
 use std::sync::{Arc, Mutex};
 use lame::Lame;
 
+const FLAC: &'static str = "flac";
+const MP3: &'static str = "mp3";
 const TTL: Timespec = Timespec { sec: 1, nsec: 0 };
 
 /// Set of FileTypes this FS is concerned with. Everything else will be filtered out of
@@ -23,10 +25,6 @@ const TTL: Timespec = Timespec { sec: 1, nsec: 0 };
 const RELEVANT_FILETYPES: [&'static FileType; 3] = [
     &FileType::Directory, &FileType::RegularFile, &FileType::Symlink
 ];
-
-/// Set of file extensions this FS is concerned with. Everything else will be filtered out
-/// of directory listings.
-const RELEVANT_EXTENSIONS: [&'static str; 2] = ["flac", "mp3"];
 
 pub struct Mp3V0Fs {
     pub target: OsString,
@@ -63,9 +61,19 @@ impl Mp3V0Fs {
     }
 
     fn real_path(&self, partial: &Path) -> OsString {
-        PathBuf::from(&self.target)
-            .join(partial.strip_prefix("/").unwrap())
-            .into_os_string()
+        let partial = partial.strip_prefix("/").unwrap();
+        let original_candidate = PathBuf::from(&self.target)
+            .join(partial);
+
+        if original_candidate.exists() {
+            return original_candidate.into_os_string();
+        }
+
+        // If the original candidate didn't exist, assume a FLAC alias does
+        let flac_partial = replace_extension(partial.to_str().unwrap(), FLAC);
+        return PathBuf::from(&self.target)
+            .join(flac_partial)
+            .into_os_string();
     }
 
     fn stat_real(&self, path: &Path) -> io::Result<FileAttr> {
@@ -232,15 +240,18 @@ impl FilesystemMT for Mp3V0Fs {
                         let real_path = self.real_path(&entry_path);
 
                         let file_extension = parse_extension(real_path.to_str().unwrap());
-                        if !RELEVANT_EXTENSIONS.contains(&file_extension) {
-                            continue;
-                        }
-                    }
+                        let fuse_file_name = match file_extension {
+                            FLAC => OsString::from(replace_extension(name.to_str().unwrap(), MP3)),
+                            MP3 => name,
+                            // Filter out any filetypes we don't care about
+                            _ => continue
+                        };
 
-                    entries.push(DirectoryEntry {
-                        name,
-                        kind: filetype,
-                    })
+                        entries.push(DirectoryEntry {
+                            name: fuse_file_name,
+                            kind: filetype
+                        })
+                    }
                 },
                 Ok(None) => { break; },
                 Err(e) => {
@@ -336,9 +347,30 @@ fn parse_extension(path: &str) -> &str {
     return extension_and_name[0]
 }
 
+/// Replaces the extension of a file with the provided replacement
+fn replace_extension(path: &str, replacement: &str) -> String {
+    let path_components: Vec<&str> = path.split("/").collect();
+
+    if path_components.len() == 0 {
+        return String::from("")
+    }
+    let file_name = path_components[path_components.len() - 1];
+
+    let mut name_and_extension: Vec<&str> = file_name.split(".").collect();
+    match name_and_extension.len() {
+        0 => String::from(""),
+        1 => String::from(name_and_extension[0]),
+        _ => {
+            name_and_extension.remove(name_and_extension.len() - 1);
+            name_and_extension.push(replacement);
+            name_and_extension.join(".")
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::mp3v0fs::parse_extension;
+    use crate::mp3v0fs::{MP3, parse_extension, replace_extension};
 
     #[test]
     fn test_parse_extension() {
@@ -350,4 +382,15 @@ mod tests {
         assert_eq!("", parse_extension("test"));
     }
 
+    #[test]
+    fn test_replace_extension() {
+        assert_eq!("", replace_extension("", MP3));
+        assert_eq!("test", replace_extension("test", MP3));
+        assert_eq!("test", replace_extension("./test", MP3));
+        assert_eq!("test", replace_extension("/media/music/test", MP3));
+        assert_eq!("test.mp3", replace_extension("/media/music/test.flac", MP3));
+        assert_eq!("test.mp3", replace_extension("/media/music/test.mp3", MP3));
+        assert_eq!("flac", replace_extension("test.flac", MP3));
+        assert_eq!("mp3", replace_extension("test.mp3", MP3));
+    }
 }
