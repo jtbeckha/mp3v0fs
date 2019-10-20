@@ -390,7 +390,7 @@ mod tests {
         assert_eq!("test", replace_extension("/media/music/test", MP3));
         assert_eq!("test.mp3", replace_extension("/media/music/test.flac", MP3));
         assert_eq!("test.mp3", replace_extension("/media/music/test.mp3", MP3));
-        assert_eq!("flac", replace_extension("test.flac", MP3));
-        assert_eq!("mp3", replace_extension("test.mp3", MP3));
+        assert_eq!("test.mp3", replace_extension("test.flac", MP3));
+        assert_eq!("test.mp3", replace_extension("test.mp3", MP3));
     }
 }
