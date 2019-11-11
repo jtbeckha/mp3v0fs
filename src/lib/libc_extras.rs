@@ -1,12 +1,11 @@
-// TODO move to local library?
 // libc_extras :: Functions missing from the libc crate and wrappers for better cross-platform
 //                compatibility.
 //
 // Copyright (c) 2016-2017 by William R. Fraser
 //
 
+#![allow(non_camel_case_types)]
 pub mod libc {
-    #![allow(non_camel_case_types)]
 
     pub use ::libc::*;
 

@@ -143,18 +143,6 @@ impl FilesystemMT for Mp3V0Fs {
         }
     }
 
-    fn release(&self, _req: RequestInfo, path: &Path, fh: u64, _flags: u32, _lock_owner: u64, _flush: bool) -> ResultEmpty {
-        debug!("release: {:?}", path);
-
-        let mut fds = self.fds.lock().unwrap();
-        if fds.contains_key(&fh) {
-            debug!("removing fh={} from fds", fh);
-            fds.remove(&fh);
-        }
-
-        Ok(())
-    }
-
     fn read(&self, _req: RequestInfo, path: &Path, fh: u64, offset: u64, size: u32, result: impl FnOnce(Result<&[u8], libc::c_int>)) {
         debug!{"read: {:?} offset {:?}", path, offset};
 
@@ -187,6 +175,18 @@ impl FilesystemMT for Mp3V0Fs {
         //TODO drop the encoder once we reach EOF or if some error occurs
 
         result(Ok(&data))
+    }
+
+    fn release(&self, _req: RequestInfo, path: &Path, fh: u64, _flags: u32, _lock_owner: u64, _flush: bool) -> ResultEmpty {
+        debug!("release: {:?}", path);
+
+        let mut fds = self.fds.lock().unwrap();
+        if fds.contains_key(&fh) {
+            debug!("removing fh={} from fds", fh);
+            fds.remove(&fh);
+        }
+
+        Ok(())
     }
 
     fn opendir(&self, _req: RequestInfo, path: &Path, flags: u32) -> ResultOpen {
@@ -354,7 +354,7 @@ fn parse_extension(path: &str) -> String {
     }
     let file_name = path_components[path_components.len() - 1];
 
-    let mut name_and_extension: Vec<&str> = file_name.split(".").collect();
+    let name_and_extension: Vec<&str> = file_name.split(".").collect();
     match name_and_extension.len() {
         0 | 1 => String::from(""),
         _ => String::from(name_and_extension[name_and_extension.len() - 1])

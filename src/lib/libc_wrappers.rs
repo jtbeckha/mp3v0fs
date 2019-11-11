@@ -1,4 +1,3 @@
-// TODO move to local library?
 // Libc Wrappers :: Safe wrappers around system calls.
 //
 // Copyright (c) 2016-2019 by William R. Fraser
@@ -9,7 +8,6 @@ use std::io;
 use std::mem;
 use std::ptr;
 use std::os::unix::ffi::OsStringExt;
-//use libc_extras::libc;
 
 macro_rules! into_cstring {
     ($path:expr, $syscall:expr) => {
@@ -131,13 +129,13 @@ pub fn lsetxattr(path: OsString, name: OsString, value: &[u8], flags: u32, posit
     let path_c = into_cstring!(path, "lsetxattr");
     let name_c = into_cstring!(name, "lsetxattr");
 
-//    // MacOS obnoxiously has an non-standard parameter at the end of their lsetxattr...
-//    #[cfg(target_os = "macos")]
-//    unsafe fn real(path: *const libc::c_char, name: *const libc::c_char,
-//                   value: *const libc::c_void, size: libc::size_t, flags: libc::c_int,
-//                   position: u32) -> libc::c_int {
-//        libc::lsetxattr(path, name, value, size, flags, position)
-//    }
+    // MacOS obnoxiously has an non-standard parameter at the end of their lsetxattr...
+    #[cfg(target_os = "macos")]
+    unsafe fn real(path: *const libc::c_char, name: *const libc::c_char,
+                   value: *const libc::c_void, size: libc::size_t, flags: libc::c_int,
+                   position: u32) -> libc::c_int {
+        libc::lsetxattr(path, name, value, size, flags, position)
+    }
 
     #[cfg(not(target_os = "macos"))]
     unsafe fn real(path: *const libc::c_char, name: *const libc::c_char,
