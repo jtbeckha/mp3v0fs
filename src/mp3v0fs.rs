@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 use std::vec::Vec;
 use time::Timespec;
 
-use super::lib::libc_extras::libc;
-use super::lib::libc_wrappers;
+use super::libc_util::libc_extras::libc;
+use super::libc_util::libc_wrappers;
 
 use fuse_mt::*;
 use crate::encode::Encoder;

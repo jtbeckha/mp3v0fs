@@ -10,7 +10,7 @@ use std::env;
 use std::ffi::{OsStr, OsString};
 
 mod encode;
-mod lib;
+mod libc_util;
 mod mp3v0fs;
 mod tags;
 
