@@ -11,7 +11,7 @@ use super::libc_util::libc_extras::libc;
 use super::libc_util::libc_wrappers;
 
 use fuse_mt::*;
-use crate::encode::Encoder;
+use crate::encode::{Encode, FlacToMp3Encoder};
 use claxon::FlacReader;
 use std::sync::{Arc, Mutex};
 use lame::Lame;
@@ -29,7 +29,7 @@ const RELEVANT_FILETYPES: [&'static FileType; 3] = [
 pub struct Mp3V0Fs {
     pub target: OsString,
     lame_wrapper: LameWrapper,
-    fds: Arc<Mutex<HashMap<u64, Encoder<File>>>>
+    fds: Arc<Mutex<HashMap<u64, FlacToMp3Encoder<File>>>>
 }
 
 /// Wrapper to allow Lame to be shared across threads (which should be safe according to
@@ -157,7 +157,7 @@ impl FilesystemMT for Mp3V0Fs {
                 Err(err) => panic!("Error opening file {}. {}", path.to_str().unwrap(), err)
             };
 
-            let encoder = Encoder::new(flac_reader, size as usize);
+            let encoder = FlacToMp3Encoder::new(flac_reader, size as usize);
 
             debug!("adding fh={} to fds", fh);
             fds.insert(fh, encoder);
