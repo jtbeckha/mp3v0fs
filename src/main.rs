@@ -8,6 +8,7 @@ extern crate time;
 use simplelog::{CombinedLogger, LevelFilter, Config, SimpleLogger};
 use std::env;
 use std::ffi::{OsStr, OsString};
+use std::process::exit;
 
 mod encode;
 mod libc_util;
@@ -22,7 +23,11 @@ fn main() {
         ]
     ).unwrap();
 
-    //TODO restrict to only unix systems
+    if cfg!(windows) {
+        println!("windows is not supported");
+        exit(1);
+    }
+
     let args: Vec<OsString> = env::args_os().collect();
 
     if args.len() != 3 {
