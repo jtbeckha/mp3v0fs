@@ -1,5 +1,6 @@
 use mp3v0fs::run;
 
+use crossbeam_utils::thread;
 use simplelog::{CombinedLogger, LevelFilter, Config, SimpleLogger};
 use std::env;
 use std::ffi::{OsString, OsStr};
@@ -33,8 +34,15 @@ fn main() {
         &OsStr::new("-o"), &OsStr::new("rdonly")
     ];
 
-    match run(&target, &mountpoint, &fuse_args) {
-        Ok(()) => (),
-        Err(err) => println!("Error occurred {}", err)
-    }
+    match thread::scope(|s| {
+        s.spawn(|_| {
+            match run(&target, &mountpoint, &fuse_args) {
+                Ok(()) => (),
+                Err(err) => panic!("Error occurred {}", err)
+            }
+        });
+    }) {
+        Ok(_) => (),
+        Err(_) => panic!("FUSE thread panicked")
+    };
 }
