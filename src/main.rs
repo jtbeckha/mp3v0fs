@@ -1,7 +1,8 @@
-use mp3v0fs::mp3v0fs::Mp3V0Fs;
+use mp3v0fs::run;
+
 use simplelog::{CombinedLogger, LevelFilter, Config, SimpleLogger};
 use std::env;
-use std::ffi::{OsStr, OsString};
+use std::ffi::{OsString, OsStr};
 use std::process::exit;
 
 fn main() {
@@ -21,20 +22,19 @@ fn main() {
 
     if args.len() != 3 {
         println!("usage: {} <target> <mountpoint>", &env::args().next().unwrap());
-        ::std::process::exit(-1);
+        exit(1);
     }
 
-    let filesystem = Mp3V0Fs::new(args[1].clone());
+    let target = args[1].clone();
+    let mountpoint = args[2].clone();
 
     let fuse_args: Vec<&OsStr> = vec![
         &OsStr::new("-o"), &OsStr::new("auto_unmount"),
         &OsStr::new("-o"), &OsStr::new("rdonly")
     ];
 
-    match fuse_mt::mount(
-        fuse_mt::FuseMT::new(filesystem, 1), &args[2], &fuse_args
-    ) {
-        Ok(fs) => fs,
+    match run(&target, &mountpoint, &fuse_args) {
+        Ok(()) => (),
         Err(err) => println!("Error occurred {}", err)
     }
 }
