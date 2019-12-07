@@ -1,19 +1,8 @@
-//#![warn(missing_docs, bad_style, unused, unused_extern_crates, unused_import_braces, unused_qualifications, missing_debug_implementations)]
-extern crate libc;
-#[macro_use]
-extern crate log;
-extern crate simplelog;
-extern crate time;
-
+use mp3v0fs::mp3v0fs::Mp3V0Fs;
 use simplelog::{CombinedLogger, LevelFilter, Config, SimpleLogger};
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::process::exit;
-
-mod encode;
-mod libc_util;
-mod mp3v0fs;
-mod tags;
 
 fn main() {
     // Initialize logging
@@ -35,7 +24,7 @@ fn main() {
         ::std::process::exit(-1);
     }
 
-    let filesystem = mp3v0fs::Mp3V0Fs::new(args[1].clone());
+    let filesystem = Mp3V0Fs::new(args[1].clone());
 
     let fuse_args: Vec<&OsStr> = vec![
         &OsStr::new("-o"), &OsStr::new("auto_unmount"),
