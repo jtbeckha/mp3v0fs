@@ -10,10 +10,11 @@ pub mod libc_util;
 pub mod mp3v0fs;
 pub mod tags;
 
-use mp3v0fs::Mp3V0Fs;
+use crate::mp3v0fs::Mp3V0Fs;
 
 use std::ffi::{OsString, OsStr};
 use std::io::Result;
+use fuse::BackgroundSession;
 
 pub fn run(target: &OsString, mountpoint: &OsString, fuse_args: &Vec<&OsStr>) -> Result<()> {
     let filesystem = Mp3V0Fs::new(target.clone());
@@ -21,4 +22,14 @@ pub fn run(target: &OsString, mountpoint: &OsString, fuse_args: &Vec<&OsStr>) ->
     fuse_mt::mount(
         fuse_mt::FuseMT::new(filesystem, 1), &mountpoint, fuse_args
     )
+}
+
+pub fn run_async<'a>(target: &OsString, mountpoint: &OsString, fuse_args: &Vec<&OsStr>) -> Result<BackgroundSession<'a>> {
+    let filesystem = Mp3V0Fs::new(target.clone());
+
+    unsafe {
+        fuse::spawn_mount(
+            fuse_mt::FuseMT::new(filesystem, 1), &mountpoint, fuse_args
+        )
+    }
 }
