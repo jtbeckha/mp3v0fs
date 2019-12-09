@@ -152,7 +152,7 @@ impl FilesystemMT for Mp3V0Fs {
 
         // TODO move this to open(), also block calls to open a file that is already open
         if !fds.contains_key(&fh) {
-            let  flac_reader = match FlacReader::open(path.to_owned()) {
+            let flac_reader = match FlacReader::open(path.to_owned()) {
                 Ok(flac_reader) => flac_reader,
                 Err(err) => panic!("Error opening file {}. {}", path.to_str().unwrap(), err)
             };
