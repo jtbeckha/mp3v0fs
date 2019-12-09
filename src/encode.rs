@@ -16,8 +16,8 @@ use std::borrow::{BorrowMut, Borrow};
 pub trait Encode<R: io::Read> {
 
     /// Returns a chunk of encoded mp3 data of the requested size.
-    /// This functions maintains state about where it is at in the data stream, and will
-    /// return the next chunk of encoded mp3 data on subsequent calls.
+    /// This functions maintains state about where it is in the data stream, and returns
+    /// the next chunk of encoded mp3 data on subsequent calls.
     fn read(&mut self, lame: &mut Lame, size: u32) -> Vec<u8> {
         while self.get_mp3_buffer().len() < size as usize {
             let encoded_length = self.encode(lame, size as usize);
@@ -128,8 +128,7 @@ impl Encode<File> for FlacToMp3Encoder<File> {
 
         let sample_count = pcm_right.len();
 
-        // I have no idea what this size calculation is, shamelessly copied from mp3fs. May or
-        // not may reasonable for v0 encodings TODO learn about this
+        // Worst case buffer size estimate per LAME docs
         let mut lame_buffer = vec![0; 5*sample_count/4 + 7200];
         let output_length = match lame.encode(
             pcm_left.as_slice(), pcm_right.as_slice(), &mut lame_buffer
