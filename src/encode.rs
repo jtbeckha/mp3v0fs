@@ -28,11 +28,9 @@ pub trait Encode<R: io::Read> {
         }
 
         let mp3_buffer = self.get_mp3_buffer_mut();
+        let encoded_mp3_chunk_size = min(size as usize, mp3_buffer.len());
         let mut encoded_mp3_chunk: Vec<u8> = Vec::with_capacity(min(size as usize, mp3_buffer.len()));
-        for _i in 0..size {
-            if mp3_buffer.is_empty() {
-                break;
-            }
+        for _i in 0..encoded_mp3_chunk_size {
             encoded_mp3_chunk.push(mp3_buffer.pop_front().unwrap());
         }
 
