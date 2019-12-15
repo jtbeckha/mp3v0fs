@@ -330,7 +330,8 @@ fn stat_to_fuse(stat: libc::stat64) -> FileAttr {
     let perm = (stat.st_mode & 0o7777) as u16;
 
     FileAttr {
-        size: stat.st_size as u64,
+        //TODO estimate size
+        size: stat.st_size as u64 * 2,
         blocks: stat.st_blocks as u64,
         atime: Timespec { sec: stat.st_atime as i64, nsec: stat.st_atime_nsec as i32 },
         mtime: Timespec { sec: stat.st_mtime as i64, nsec: stat.st_mtime_nsec as i32 },

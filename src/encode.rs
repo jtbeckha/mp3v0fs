@@ -8,6 +8,7 @@ use crate::tags;
 use id3::{Tag, Version};
 use std::io::Cursor;
 use std::borrow::{BorrowMut, Borrow};
+use std::cmp::min;
 
 /// The `Encode` trait allows for encoding data from a reader to mp3.
 ///
@@ -27,11 +28,12 @@ pub trait Encode<R: io::Read> {
         }
 
         let mp3_buffer = self.get_mp3_buffer_mut();
-        let mut encoded_mp3_chunk: Vec<u8> = Vec::with_capacity(size as usize);
+        let mut encoded_mp3_chunk: Vec<u8> = Vec::with_capacity(min(size as usize, mp3_buffer.len()));
         for _i in 0..size {
-            if !mp3_buffer.is_empty() {
-                encoded_mp3_chunk.push(mp3_buffer.pop_front().unwrap());
+            if mp3_buffer.is_empty() {
+                break;
             }
+            encoded_mp3_chunk.push(mp3_buffer.pop_front().unwrap());
         }
 
         encoded_mp3_chunk
@@ -104,10 +106,15 @@ impl Encode<File> for FlacToMp3Encoder<File> {
         let mut pcm_left: Vec<i16> = Vec::with_capacity(size);
         let mut pcm_right: Vec<i16> = Vec::with_capacity(size);
 
+        let mut should_flush = false;
+
         for _i in 0..size*2 {
             let l_frame = match self.flac_samples.next() {
                 Some(l_frame) => l_frame.unwrap(),
-                None => break
+                None => {
+                    should_flush = true;
+                    break;
+                }
             };
             // The FLAC decoder returns sampled in a signed 32-bit format. If we ignore 24-bit FLACs
             // for now, we can safely just convert that to an i16
@@ -117,7 +124,10 @@ impl Encode<File> for FlacToMp3Encoder<File> {
 
             let r_frame = match self.flac_samples.next() {
                 Some(r_frame) => r_frame.unwrap(),
-                None => break
+                None => {
+                    should_flush = true;
+                    break;
+                }
             };
             // The FLAC decoder returns sampled in a signed 32-bit format. If we ignore 24-bit FLACs
             // for now, we can safely just convert that to an i16
@@ -130,7 +140,7 @@ impl Encode<File> for FlacToMp3Encoder<File> {
 
         // Worst case buffer size estimate per LAME docs
         let mut lame_buffer = vec![0; 5*sample_count/4 + 7200];
-        let output_length = match lame.encode(
+        let mut output_length = match lame.encode(
             pcm_left.as_slice(), pcm_right.as_slice(), &mut lame_buffer
         ) {
             Ok(output_length) => output_length,
@@ -140,6 +150,23 @@ impl Encode<File> for FlacToMp3Encoder<File> {
 
         for byte in lame_buffer {
             self.mp3_buffer.push_back(byte);
+        }
+
+        // Collect remaining output of internal LAME buffers once we reach the end
+        // of the PCM data stream
+        if should_flush {
+            let mut lame_buffer = vec![0; 7200];
+            let flush_output_length = match lame.encode_flush(&mut lame_buffer) {
+                Ok(output_length) => output_length,
+                Err(err) => panic!("Unexpected error flushing LAME buffers: {:?}", err)
+            };
+            lame_buffer.truncate(flush_output_length);
+
+            for byte in lame_buffer {
+                self.mp3_buffer.push_back(byte);
+            }
+
+            output_length = output_length + flush_output_length;
         }
 
         output_length
