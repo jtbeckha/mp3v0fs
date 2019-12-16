@@ -14,7 +14,6 @@ use fuse_mt::*;
 use crate::encode::{Encode, FlacToMp3Encoder};
 use claxon::FlacReader;
 use std::sync::{Arc, Mutex};
-use lame::Lame;
 
 const FLAC: &'static str = "flac";
 const MP3: &'static str = "mp3";
@@ -28,34 +27,15 @@ const RELEVANT_FILETYPES: [&'static FileType; 3] = [
 
 pub struct Mp3V0Fs {
     pub target: OsString,
-    lame_wrapper: LameWrapper,
     fds: Arc<Mutex<HashMap<u64, FlacToMp3Encoder<File>>>>
 }
-
-/// Wrapper to allow Lame to be shared across threads (which should be safe according to
-/// this thread, since we are only using the encoder:
-/// https://sourceforge.net/p/lame/mailman/lame-dev/thread/01b001c40cd8%2408e80870%240c01a8c0%40Stevo03/)
-struct LameWrapper {
-    lame: Arc<Mutex<Lame>>
-}
-unsafe impl Send for LameWrapper {}
-unsafe impl Sync for LameWrapper {}
 
 impl Mp3V0Fs {
 
     pub fn new(target: OsString) -> Mp3V0Fs {
-        let mut lame = match Lame::new() {
-            Some(lame) => lame,
-            None => panic!("Failed to initialize LAME MP3 encoder")
-        };
-
-        lame.set_channels(2).expect("Failed to call lame.set_channels()");
-        lame.set_quality(0).expect("Failed to call lame.set_quality()");
-        lame.init_params().expect("Failed to call lame.init_params()");
 
         Mp3V0Fs {
             target,
-            lame_wrapper: LameWrapper { lame: Arc::new(Mutex::new(lame)) },
             fds: Arc::new(Mutex::new(HashMap::new()))
         }
     }
@@ -168,9 +148,7 @@ impl FilesystemMT for Mp3V0Fs {
             None => panic!("Failed to read encoder from fds")
         };
 
-        let mut lame = self.lame_wrapper.lame.lock().unwrap();
-
-        let data = encoder.read(&mut lame, size);
+        let data = encoder.read(size);
 
         //TODO drop the encoder once we reach EOF or if some error occurs
 

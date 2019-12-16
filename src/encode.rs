@@ -9,6 +9,7 @@ use id3::{Tag, Version};
 use std::io::Cursor;
 use std::borrow::{BorrowMut, Borrow};
 use std::cmp::min;
+use std::sync::{Arc, Mutex};
 
 /// The `Encode` trait allows for encoding data from a reader to mp3.
 ///
@@ -19,9 +20,9 @@ pub trait Encode<R: io::Read> {
     /// Returns a chunk of encoded mp3 data of the requested size.
     /// This functions maintains state about where it is in the data stream, and returns
     /// the next chunk of encoded mp3 data on subsequent calls.
-    fn read(&mut self, lame: &mut Lame, size: u32) -> Vec<u8> {
+    fn read(&mut self, size: u32) -> Vec<u8> {
         while self.get_mp3_buffer().len() < size as usize {
-            let encoded_length = self.encode(lame, size as usize);
+            let encoded_length = self.encode(size as usize);
             if encoded_length == 0 {
                 break;
             }
@@ -39,7 +40,7 @@ pub trait Encode<R: io::Read> {
 
     /// Encodes the next chunk of data to mp3 v0.
     /// Returns the length of encoded data written to the mp3_buffer.
-    fn encode(&mut self, lame: &mut Lame, size: usize) -> usize;
+    fn encode(&mut self, size: usize) -> usize;
 
     /// Get the mp3_buffer used to temporarily store encoded mp3 data.
     fn get_mp3_buffer(&self) -> &VecDeque<u8>;
@@ -47,7 +48,15 @@ pub trait Encode<R: io::Read> {
     fn get_mp3_buffer_mut(&mut self) -> &mut VecDeque<u8>;
 }
 
+/// Wrapper for Lame so it can be marked Send/Sync for fuse-mt
+struct LameWrapper {
+    lame: Arc<Mutex<Lame>>
+}
+unsafe impl Send for LameWrapper {}
+unsafe impl Sync for LameWrapper {}
+
 pub struct FlacToMp3Encoder<R: io::Read> {
+    lame_wrapper: LameWrapper,
     flac_samples: FlacSamples<BufferedReader<R>>,
     mp3_buffer: VecDeque<u8>
 }
@@ -80,8 +89,20 @@ impl FlacToMp3Encoder<File> {
             mp3_buffer.push_back(byte.clone());
         }
 
+        let mut lame = match Lame::new() {
+            Some(lame) => lame,
+            None => panic!("Failed to initialize LAME MP3 encoder")
+        };
+
+        lame.set_channels(2).expect("Failed to call lame.set_channels()");
+        lame.set_quality(0).expect("Failed to call lame.set_quality()");
+        lame.init_params().expect("Failed to call lame.init_params()");
+
         let encoder = FlacToMp3Encoder {
             flac_samples: flac_reader.samples_owned(),
+            lame_wrapper: LameWrapper {
+                lame: Arc::from(Mutex::new(lame))
+            },
             mp3_buffer
         };
         encoder
@@ -98,7 +119,7 @@ impl FlacToMp3Encoder<File> {
 /// Implementation of Encoder that converts FLAC to MP3.
 impl Encode<File> for FlacToMp3Encoder<File> {
 
-    fn encode(&mut self, lame: &mut Lame, size: usize) -> usize {
+    fn encode(&mut self, size: usize) -> usize {
         //TODO figure out size calculation? Probably need some kind of lazily calculated circular
         //buffer that the FS can pull from for the mp3 data
         let mut pcm_left: Vec<i16> = Vec::with_capacity(size);
@@ -138,6 +159,7 @@ impl Encode<File> for FlacToMp3Encoder<File> {
 
         // Worst case buffer size estimate per LAME docs
         let mut lame_buffer = vec![0; 5*sample_count/4 + 7200];
+        let mut lame = self.lame_wrapper.lame.lock().unwrap();
         let mut output_length = match lame.encode(
             pcm_left.as_slice(), pcm_right.as_slice(), &mut lame_buffer
         ) {
