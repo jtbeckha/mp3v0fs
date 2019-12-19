@@ -6,6 +6,7 @@ use std::io::Error;
 use std::thread;
 use std::time::Duration;
 use tempfile::TempDir;
+use id3::Tag;
 
 #[test]
 fn test_filesystem() -> Result<(), Error> {
@@ -29,6 +30,19 @@ fn test_filesystem() -> Result<(), Error> {
         let read_dir_result = read_dir(mount_dir.path())?;
         let entry = read_dir_result.into_iter().next().unwrap()?;
         assert_eq!("C1.mp3", entry.file_name());
+
+        // Validate tags were written as expected
+        let tags = Tag::read_from_path(entry.path()).unwrap();
+        assert!(tags.get("TALB").is_some());
+        assert!(tags.get("TPE1").is_some());
+        assert!(tags.get("TPE2").is_some());
+        assert!(tags.get("TIT2").is_some());
+        assert!(tags.get("TRCK").is_some());
+        assert_eq!("test_album", tags.get("TALB").unwrap().content().text().unwrap());
+        assert_eq!("test_artist", tags.get("TPE1").unwrap().content().text().unwrap());
+        assert_eq!("test_album_artist", tags.get("TPE2").unwrap().content().text().unwrap());
+        assert_eq!("test_title", tags.get("TIT2").unwrap().content().text().unwrap());
+        assert_eq!("1", tags.get("TRCK").unwrap().content().text().unwrap());
 
         // Decoding the resulting mp3 and counting the frames should give us some confidence
         // in the integrity of the file
