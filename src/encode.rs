@@ -22,6 +22,12 @@ pub trait Encode<R: io::Read> {
     /// This functions maintains state about where it is in the data stream, and returns
     /// the next chunk of encoded mp3 data on subsequent calls.
     fn read(&mut self, size: u32) -> Vec<u8> {
+        // Lazily set buffer capacity, since we don't know the chunk size that will be requested
+        // until read is called for the first time.
+        if self.get_mp3_buffer().capacity() == 0 {
+            self.get_mp3_buffer_mut().reserve((size * 2) as usize);
+        }
+
         while self.get_mp3_buffer().len() < size as usize {
             let encoded_length = self.encode(size as usize);
             if encoded_length == 0 {
@@ -69,7 +75,7 @@ pub struct FlacToMp3Encoder<R: io::Read> {
 /// Encoder for a FLAC file.
 impl FlacToMp3Encoder<File> {
 
-    pub fn new(flac_reader: FlacReader<File>, size: usize) -> FlacToMp3Encoder<File> {
+    pub fn new(flac_reader: FlacReader<File>) -> FlacToMp3Encoder<File> {
         let flac_tags = flac_reader.tags();
         let mut mp3_tag = Tag::new();
 
@@ -92,7 +98,7 @@ impl FlacToMp3Encoder<File> {
             Err(e) => error!("Error writing tags, description={}", e.description)
         }
 
-        let mut mp3_buffer: VecDeque<u8> = VecDeque::with_capacity(size * 2);
+        let mut mp3_buffer: VecDeque<u8> = VecDeque::with_capacity(4096);
         for byte in tag_buffer.get_ref() {
             mp3_buffer.push_back(byte.clone());
         }

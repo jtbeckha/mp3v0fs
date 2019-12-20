@@ -114,8 +114,24 @@ impl FilesystemMT for Mp3V0Fs {
         debug!("open: {:?} flags={:#x}", path, flags);
 
         let real = self.real_path(path);
-        match libc_wrappers::open(real, flags as libc::c_int) {
-            Ok(fh) => Ok((fh, flags)),
+        match libc_wrappers::open(real.to_owned(), flags as libc::c_int) {
+            Ok(fh) => {
+                let mut fds = self.fds.lock().unwrap();
+
+                if !fds.contains_key(&fh) {
+                    let flac_reader = match FlacReader::open(real.to_owned()) {
+                        Ok(flac_reader) => flac_reader,
+                        Err(err) => panic!("Error opening file {}. {}", path.to_str().unwrap(), err)
+                    };
+
+                    let encoder = FlacToMp3Encoder::new(flac_reader);
+
+                    debug!("adding fh={} to fds", fh);
+                    fds.insert(fh, encoder);
+                }
+
+                Ok((fh, flags))
+            },
             Err(e) => {
                 error!("open({:?}): {}", path, io::Error::from_raw_os_error(e));
                 Err(e)
@@ -126,23 +142,7 @@ impl FilesystemMT for Mp3V0Fs {
     fn read(&self, _req: RequestInfo, path: &Path, fh: u64, offset: u64, size: u32, result: impl FnOnce(Result<&[u8], libc::c_int>)) {
         debug!{"read: {:?} offset {:?}", path, offset};
 
-        let path = self.real_path(path);
-
         let mut fds = self.fds.lock().unwrap();
-
-        // TODO move this to open(), also block calls to open a file that is already open
-        if !fds.contains_key(&fh) {
-            let flac_reader = match FlacReader::open(path.to_owned()) {
-                Ok(flac_reader) => flac_reader,
-                Err(err) => panic!("Error opening file {}. {}", path.to_str().unwrap(), err)
-            };
-
-            let encoder = FlacToMp3Encoder::new(flac_reader, size as usize);
-
-            debug!("adding fh={} to fds", fh);
-            fds.insert(fh, encoder);
-        }
-
         let encoder = match fds.get_mut(&fh) {
             Some(encoder) => encoder,
             None => panic!("Failed to read encoder from fds")
