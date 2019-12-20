@@ -1,4 +1,3 @@
-use lame::Lame;
 use claxon::{FlacReader, FlacSamples};
 use std::fs::File;
 use std::io;
@@ -11,6 +10,7 @@ use std::borrow::{BorrowMut, Borrow};
 use std::cmp::min;
 use std::sync::{Arc, Mutex};
 use claxon::metadata::StreamInfo;
+use crate::lame::Lame;
 
 /// The `Encode` trait allows for encoding data from a reader to mp3.
 ///
@@ -97,15 +97,12 @@ impl FlacToMp3Encoder<File> {
             mp3_buffer.push_back(byte.clone());
         }
 
-        let mut lame = match Lame::new() {
-            Some(lame) => lame,
-            None => panic!("Failed to initialize LAME MP3 encoder")
-        };
+        let mut lame = Lame::new().expect("Failed to initialize LAME context");
 
         lame.set_channels(2).expect("Failed to call lame.set_channels()");
 //        lame.set_kilobitrate(320).expect("Failed to call lame.set_kilobitrate()");
         lame.set_quality(0).expect("Failed to call lame.set_quality()");
-        lame.set_sample_rate(stream_info.sample_rate).expect("Failed to call lame.set_sample_rate()");
+        lame.set_in_sample_rate(stream_info.sample_rate).expect("Failed to call lame.set_sample_rate()");
 //        lame.set_channels(stream_info.channels as u8).expect("Failed to call lame.set_channels()");
         lame.init_params().expect("Failed to call lame.init_params()");
 
@@ -172,8 +169,8 @@ impl Encode<File> for FlacToMp3Encoder<File> {
         // Worst case buffer size estimate per LAME docs
         let mut lame_buffer = vec![0; 5*sample_count/4 + 7200];
         let mut lame = self.lame_wrapper.lame.lock().unwrap();
-        let mut output_length = match lame.encode(
-            pcm_left.as_slice(), pcm_right.as_slice(), &mut lame_buffer
+        let mut output_length = match lame.encode_buffer(
+            pcm_left.as_mut_slice(), pcm_right.as_mut_slice(), &mut lame_buffer
         ) {
             Ok(output_length) => output_length,
             Err(err) => panic!("Unexpected error encoding PCM data: {:?}", err),

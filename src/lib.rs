@@ -6,6 +6,7 @@ extern crate simplelog;
 extern crate time;
 
 pub mod encode;
+pub mod lame;
 pub mod libc_util;
 pub mod mp3v0fs;
 pub mod tags;
