@@ -150,8 +150,6 @@ impl FilesystemMT for Mp3V0Fs {
 
         let data = encoder.read(size);
 
-        //TODO drop the encoder once we reach EOF or if some error occurs
-
         result(Ok(&data))
     }
 
