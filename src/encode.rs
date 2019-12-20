@@ -11,6 +11,7 @@ use std::cmp::min;
 use std::sync::{Arc, Mutex};
 use claxon::metadata::StreamInfo;
 use crate::lame::Lame;
+use lame_sys::vbr_mode::vbr_mtrh;
 
 /// The `Encode` trait allows for encoding data from a reader to mp3.
 ///
@@ -98,18 +99,19 @@ impl FlacToMp3Encoder<File> {
             Err(e) => error!("Error writing tags, description={}", e.description)
         }
 
-        let mut mp3_buffer: VecDeque<u8> = VecDeque::with_capacity(4096);
+        let mut mp3_buffer: VecDeque<u8> = VecDeque::with_capacity(2048);
         for byte in tag_buffer.get_ref() {
             mp3_buffer.push_back(byte.clone());
         }
 
         let mut lame = Lame::new().expect("Failed to initialize LAME context");
 
-        lame.set_channels(2).expect("Failed to call lame.set_channels()");
-//        lame.set_kilobitrate(320).expect("Failed to call lame.set_kilobitrate()");
-        lame.set_quality(0).expect("Failed to call lame.set_quality()");
-        lame.set_in_sample_rate(stream_info.sample_rate).expect("Failed to call lame.set_sample_rate()");
-//        lame.set_channels(stream_info.channels as u8).expect("Failed to call lame.set_channels()");
+        lame.set_channels(stream_info.channels).expect("Failed to call lame.set_channels()");
+        lame.set_in_samplerate(stream_info.sample_rate).expect("Failed to call lame.set_in_samplerate()");
+        lame.set_vbr(vbr_mtrh).expect("Failed to call lame.set_vbr()");
+        lame.set_vbr_quality(0).expect("Failed to call lame.set_vbr_quality()");
+        lame.set_vbr_max_bitrate(320).expect("Failed to call lame.set_vbr_max_bitrate()");
+        lame.set_write_vbr_tag(true).expect("Failed to call lame.set_write_vbr_tag()");
         lame.init_params().expect("Failed to call lame.init_params()");
 
         let encoder = FlacToMp3Encoder {

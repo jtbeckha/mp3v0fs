@@ -1,4 +1,4 @@
-use lame_sys::lame_global_flags;
+use lame_sys::{lame_global_flags, vbr_mode};
 use std::ptr;
 use std::os::raw::c_int;
 
@@ -27,15 +27,33 @@ impl Lame {
         })
     }
 
-    pub fn set_quality(&mut self, quality: u32) -> Result<(), Error> {
+    pub fn set_in_samplerate(&mut self, samplerate: u32) -> Result<(), Error> {
         handle_return_code(unsafe {
-            lame_sys::lame_set_quality(self.context, quality as c_int)
+            lame_sys::lame_set_in_samplerate(self.context, samplerate as c_int)
         })
     }
 
-    pub fn set_in_sample_rate(&mut self, sample_rate: u32) -> Result<(), Error> {
+    pub fn set_vbr(&mut self, mode: vbr_mode) -> Result<(), Error> {
         handle_return_code(unsafe {
-            lame_sys::lame_set_in_samplerate(self.context, sample_rate as c_int)
+            lame_sys::lame_set_VBR(self.context, mode)
+        })
+    }
+
+    pub fn set_vbr_quality(&mut self, quality: u32) -> Result<(), Error> {
+        handle_return_code(unsafe {
+            lame_sys::lame_set_VBR_q(self.context, quality as c_int)
+        })
+    }
+
+    pub fn set_vbr_max_bitrate(&mut self, bitrate: u32) -> Result<(), Error> {
+        handle_return_code(unsafe {
+            lame_sys::lame_set_VBR_max_bitrate_kbps(self.context, bitrate as c_int)
+        })
+    }
+
+    pub fn set_write_vbr_tag(&mut self, toggle: bool) -> Result<(), Error> {
+        handle_return_code(unsafe {
+            lame_sys::lame_set_bWriteVbrTag(self.context, toggle as c_int)
         })
     }
 
