@@ -45,10 +45,10 @@ impl Lame {
         })
     }
 
-    pub fn encode_buffer(&mut self, pcm_left: &mut[i16], pcm_right: &mut[i16], mp3_buffer: &mut[u8])
+    pub fn encode_buffer(&mut self, pcm_left: &mut[i32], pcm_right: &mut[i32], mp3_buffer: &mut[u8])
         -> Result<usize, EncodeError> {
         handle_encode_return_code(unsafe {
-            lame_sys::lame_encode_buffer(
+            lame_sys::lame_encode_buffer_int(
                 self.context, pcm_left.as_mut_ptr(), pcm_right.as_mut_ptr(),
                 pcm_left.len() as c_int, mp3_buffer.as_mut_ptr(), mp3_buffer.len() as c_int
             )

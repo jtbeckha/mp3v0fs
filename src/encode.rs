@@ -131,37 +131,27 @@ impl Encode<File> for FlacToMp3Encoder<File> {
     fn encode(&mut self, size: usize) -> usize {
         //TODO figure out size calculation? Probably need some kind of lazily calculated circular
         //buffer that the FS can pull from for the mp3 data
-        let mut pcm_left: Vec<i16> = Vec::with_capacity(size);
-        let mut pcm_right: Vec<i16> = Vec::with_capacity(size);
+        let mut pcm_left: Vec<i32> = Vec::with_capacity(size);
+        let mut pcm_right: Vec<i32> = Vec::with_capacity(size);
 
         let mut should_flush = false;
 
-        for _i in 0..size*2 {
-            let l_frame = match self.flac_samples.next() {
-                Some(l_frame) => l_frame.unwrap(),
+        for _ in 0..size*2 {
+            match self.flac_samples.next() {
+                Some(l_frame) => pcm_left.push(l_frame.unwrap()),
                 None => {
                     should_flush = true;
                     break;
                 }
             };
-            // The FLAC decoder returns sampled in a signed 32-bit format. If we ignore 24-bit FLACs
-            // for now, we can safely just convert that to an i16
-            // TODO support 24-bit FLAC
-            let scaled_l_frame = l_frame as i16;
-            pcm_left.push(scaled_l_frame);
 
-            let r_frame = match self.flac_samples.next() {
-                Some(r_frame) => r_frame.unwrap(),
+            match self.flac_samples.next() {
+                Some(r_frame) => pcm_right.push(r_frame.unwrap()),
                 None => {
                     should_flush = true;
                     break;
                 }
             };
-            // The FLAC decoder returns sampled in a signed 32-bit format. If we ignore 24-bit FLACs
-            // for now, we can safely just convert that to an i16
-            // TODO support 24-bit FLAC
-            let scaled_r_frame = r_frame as i16;
-            pcm_right.push(scaled_r_frame);
         }
 
         let sample_count = pcm_right.len();
