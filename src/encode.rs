@@ -132,8 +132,6 @@ impl FlacToMp3Encoder<File> {
 impl Encode<File> for FlacToMp3Encoder<File> {
 
     fn encode(&mut self, size: usize) -> usize {
-        //TODO figure out size calculation? Probably need some kind of lazily calculated circular
-        //buffer that the FS can pull from for the mp3 data
         let mut pcm_left: Vec<i32> = Vec::with_capacity(size);
         let mut pcm_right: Vec<i32> = Vec::with_capacity(size);
 
@@ -147,7 +145,6 @@ impl Encode<File> for FlacToMp3Encoder<File> {
                     break;
                 }
             };
-
             match self.flac_samples.next() {
                 Some(r_frame) => pcm_right.push(r_frame.unwrap()),
                 None => {
