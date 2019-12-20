@@ -14,6 +14,7 @@ use fuse_mt::*;
 use crate::encode::{Encode, FlacToMp3Encoder};
 use claxon::FlacReader;
 use std::sync::{Arc, Mutex};
+use fuse::{Filesystem, ReplyOpen, ReplyAttr, ReplyData, ReplyXattr, ReplyEmpty, Request, ReplyEntry};
 
 const FLAC: &'static str = "flac";
 const MP3: &'static str = "mp3";
@@ -33,7 +34,6 @@ pub struct Mp3V0Fs {
 impl Mp3V0Fs {
 
     pub fn new(target: OsString) -> Mp3V0Fs {
-
         Mp3V0Fs {
             target,
             fds: Arc::new(Mutex::new(HashMap::new()))
@@ -284,6 +284,65 @@ impl FilesystemMT for Mp3V0Fs {
             let nbytes = libc_wrappers::llistxattr(real, &mut[])?;
             Ok(Xattr::Size(nbytes as u32))
         }
+    }
+}
+
+impl Filesystem for Mp3V0Fs {
+    fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, _reply: ReplyEntry) {
+        debug!("lookup: {:?}, {:?}", parent, name);
+        unimplemented!()
+    }
+
+    fn forget(&mut self, _req: &Request, ino: u64, nlookup: u64) {
+        debug!("forget: {:?}, {:?}", ino, nlookup);
+        unimplemented!()
+    }
+
+    fn getattr(&mut self, _req: &Request, ino: u64, _reply: ReplyAttr) {
+        debug!("getattr: {:?}", ino);
+        unimplemented!()
+    }
+
+    fn readlink(&mut self, _req: &Request, ino: u64, _reply: ReplyData) {
+        //TODO needed?
+        debug!("readlink: {:?}", ino);
+        unimplemented!()
+    }
+
+    fn open(&mut self, _req: &Request, ino: u64, flags: u32, _reply: ReplyOpen) {
+        debug!("open: {:?}, {:?}", ino, flags);
+        unimplemented!()
+    }
+
+    fn read(&mut self, _req: &Request, ino: u64, fh: u64, offset: i64, size: u32, _reply: ReplyData) {
+        debug!("read: {:?}, {:?}, {:?}, {:?}", ino, fh, offset, size);
+        unimplemented!()
+    }
+
+    fn release(&mut self, _req: &Request, ino: u64, fh: u64, flags: u32, lock_owner: u64, flush: bool, _reply: ReplyEmpty) {
+        debug!("release: {:?}, {:?}, {:?}, {:?}, {:?}", ino, fh, flags, lock_owner, flush);
+        unimplemented!()
+    }
+
+    fn opendir(&mut self, _req: &Request, ino: u64, flags: u32, _reply: ReplyOpen) {
+        debug!("opendir: {:?}, {:?}", ino, flags);
+        unimplemented!()
+    }
+
+    fn releasedir(&mut self, _req: &Request, ino: u64, fh: u64, flags: u32, _reply: ReplyEmpty) {
+        //TODO needed?
+        debug!("releasedir: {:?}, {:?}, {:?}", ino, fh, flags);
+        unimplemented!()
+    }
+
+    fn getxattr(&mut self, _req: &Request, ino: u64, name: &OsStr, size: u32, _reply: ReplyXattr) {
+        debug!("getxattr: {:?}, {:?}, {:?}", ino, name, size);
+        unimplemented!()
+    }
+
+    fn listxattr(&mut self, _req: &Request, ino: u64, size: u32, _reply: ReplyXattr) {
+        debug!("listxattr: {:?}, {:?}", ino, size);
+        unimplemented!()
     }
 }
 
