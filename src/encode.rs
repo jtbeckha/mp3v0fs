@@ -9,7 +9,7 @@ use std::io::Cursor;
 use std::borrow::{BorrowMut, Borrow};
 use std::cmp::min;
 use std::sync::{Arc, Mutex};
-use claxon::metadata::StreamInfo;
+use claxon::metadata::{StreamInfo, Tags};
 use crate::lame::Lame;
 use lame_sys::vbr_mode::vbr_mtrh;
 
@@ -25,18 +25,18 @@ pub trait Encode<R: io::Read> {
     fn read(&mut self, size: u32) -> Vec<u8> {
         // Lazily set buffer capacity, since we don't know the chunk size that will be requested
         // until read is called for the first time.
-        if self.get_mp3_buffer().capacity() == 0 {
-            self.get_mp3_buffer_mut().reserve((size * 2) as usize);
+        if self.get_output_buffer().capacity() == 0 {
+            self.get_output_buffer_mut().reserve((size * 2) as usize);
         }
 
-        while self.get_mp3_buffer().len() < size as usize {
+        while self.get_output_buffer().len() < size as usize {
             let encoded_length = self.encode(size as usize);
             if encoded_length == 0 {
                 break;
             }
         }
 
-        let mp3_buffer = self.get_mp3_buffer_mut();
+        let mp3_buffer = self.get_output_buffer_mut();
         let encoded_mp3_chunk_size = min(size as usize, mp3_buffer.len());
         let mut encoded_mp3_chunk: Vec<u8> = Vec::with_capacity(min(size as usize, mp3_buffer.len()));
         for _i in 0..encoded_mp3_chunk_size {
@@ -53,10 +53,10 @@ pub trait Encode<R: io::Read> {
     /// Estimate the final encoded file size.
     fn calculate_size(&mut self) -> u64;
 
-    /// Get the mp3_buffer used to temporarily store encoded mp3 data.
-    fn get_mp3_buffer(&self) -> &VecDeque<u8>;
-    /// Get the (mutable) mp3_buffer used to temporarily store encoded mp3 data.
-    fn get_mp3_buffer_mut(&mut self) -> &mut VecDeque<u8>;
+    /// Get the output buffer used to temporarily store encoded mp3 data.
+    fn get_output_buffer(&self) -> &VecDeque<u8>;
+    /// Get the (mutable) output buffer used to temporarily store encoded mp3 data.
+    fn get_output_buffer_mut(&mut self) -> &mut VecDeque<u8>;
 }
 
 /// Wrapper for Lame so it can be marked Send/Sync for fuse-mt
@@ -70,20 +70,46 @@ pub struct FlacToMp3Encoder<R: io::Read> {
     lame_wrapper: LameWrapper,
     flac_samples: FlacSamples<BufferedReader<R>>,
     stream_info: StreamInfo,
-    mp3_buffer: VecDeque<u8>
+    tag_buffer: Cursor<Vec<u8>>,
+    output_buffer: VecDeque<u8>
 }
 
 /// Encoder for a FLAC file.
 impl FlacToMp3Encoder<File> {
 
     pub fn new(flac_reader: FlacReader<File>) -> FlacToMp3Encoder<File> {
+        // Initialize tags
         let flac_tags = flac_reader.tags();
-        let mut mp3_tag = Tag::new();
+        let mut tag_buffer = Cursor::new(Vec::with_capacity(2048));
+        let mut output_buffer = VecDeque::with_capacity(2048);
+        FlacToMp3Encoder::initialize_tags(flac_tags, &mut tag_buffer, &mut output_buffer);
 
         let stream_info = flac_reader.streaminfo();
+        // Initialize LAME
+        let mut lame = Lame::new().expect("Failed to initialize LAME context");
+        lame.set_channels(stream_info.channels).expect("Failed to call lame.set_channels()");
+        lame.set_in_samplerate(stream_info.sample_rate).expect("Failed to call lame.set_in_samplerate()");
+        lame.set_vbr(vbr_mtrh).expect("Failed to call lame.set_vbr()");
+        lame.set_vbr_quality(0).expect("Failed to call lame.set_vbr_quality()");
+        lame.set_vbr_max_bitrate(320).expect("Failed to call lame.set_vbr_max_bitrate()");
+        lame.set_write_vbr_tag(true).expect("Failed to call lame.set_write_vbr_tag()");
+        lame.init_params().expect("Failed to call lame.init_params()");
 
-        //TODO collect FLAC tags instead and store as struct member, move mp3 translation
-        //and stream injection logic into init function
+        FlacToMp3Encoder {
+            flac_samples: flac_reader.samples_owned(),
+            lame_wrapper: LameWrapper {
+                lame: Arc::from(Mutex::new(lame))
+            },
+            stream_info,
+            tag_buffer,
+            output_buffer
+        }
+    }
+
+    /// Injects tag data into the output stream, which should happen before encoding starts.
+    fn initialize_tags(flac_tags: Tags, tag_buffer: &mut Cursor<Vec<u8>>, output_buffer: &mut VecDeque<u8>) {
+        let mut mp3_tag = Tag::new();
+
         for tag in flac_tags {
             match tags::translate_vorbis_comment_to_id3(
                 &String::from(tag.0), &String::from(tag.1)
@@ -93,43 +119,12 @@ impl FlacToMp3Encoder<File> {
             };
         }
 
-        let mut tag_buffer: Cursor<Vec<u8>> = Cursor::new(Vec::with_capacity(2048));
-        match mp3_tag.write_to(&mut tag_buffer, Version::Id3v23) {
-            Ok(()) => (),
-            Err(e) => error!("Error writing tags, description={}", e.description)
-        }
+        mp3_tag.write_to(tag_buffer.borrow_mut(), Version::Id3v23).expect("Failed to write tags");
 
-        let mut mp3_buffer: VecDeque<u8> = VecDeque::with_capacity(2048);
         for byte in tag_buffer.get_ref() {
-            mp3_buffer.push_back(byte.clone());
+            output_buffer.push_back(byte.clone());
         }
-
-        let mut lame = Lame::new().expect("Failed to initialize LAME context");
-
-        lame.set_channels(stream_info.channels).expect("Failed to call lame.set_channels()");
-        lame.set_in_samplerate(stream_info.sample_rate).expect("Failed to call lame.set_in_samplerate()");
-        lame.set_vbr(vbr_mtrh).expect("Failed to call lame.set_vbr()");
-        lame.set_vbr_quality(0).expect("Failed to call lame.set_vbr_quality()");
-        lame.set_vbr_max_bitrate(320).expect("Failed to call lame.set_vbr_max_bitrate()");
-        lame.set_write_vbr_tag(true).expect("Failed to call lame.set_write_vbr_tag()");
-        lame.init_params().expect("Failed to call lame.init_params()");
-
-        let encoder = FlacToMp3Encoder {
-            flac_samples: flac_reader.samples_owned(),
-            lame_wrapper: LameWrapper {
-                lame: Arc::from(Mutex::new(lame))
-            },
-            stream_info,
-            mp3_buffer
-        };
-        encoder
     }
-
-//    /// Handles work that needs to be done before PCM data starts being encoded,
-//    /// e.g. injecting tag data into the stream.
-//    fn initialize(&self, mp3_tag: Tag) {
-//        mp3_tag.write_to(self.mp3_buffer.clone(), Version::Id3v23);
-//    }
 
 }
 
@@ -176,7 +171,7 @@ impl Encode<File> for FlacToMp3Encoder<File> {
         lame_buffer.truncate(output_length);
 
         for byte in lame_buffer {
-            self.mp3_buffer.push_back(byte);
+            self.output_buffer.push_back(byte);
         }
 
         // Collect remaining output of internal LAME buffers once we reach the end
@@ -190,7 +185,7 @@ impl Encode<File> for FlacToMp3Encoder<File> {
             lame_buffer.truncate(flush_output_length);
 
             for byte in lame_buffer {
-                self.mp3_buffer.push_back(byte);
+                self.output_buffer.push_back(byte);
             }
 
             output_length = output_length + flush_output_length;
@@ -203,11 +198,11 @@ impl Encode<File> for FlacToMp3Encoder<File> {
         unimplemented!();
     }
 
-    fn get_mp3_buffer(&self) -> &VecDeque<u8> {
-        return self.mp3_buffer.borrow();
+    fn get_output_buffer(&self) -> &VecDeque<u8> {
+        return self.output_buffer.borrow();
     }
 
-    fn get_mp3_buffer_mut(&mut self) -> &mut VecDeque<u8> {
-        return self.mp3_buffer.borrow_mut();
+    fn get_output_buffer_mut(&mut self) -> &mut VecDeque<u8> {
+        return self.output_buffer.borrow_mut();
     }
 }
