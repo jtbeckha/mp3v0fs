@@ -31,13 +31,19 @@ mod tests {
     use id3::Frame;
     use id3::frame::Content;
 
-   //TODO test with non-ascii tags
    #[test]
    fn test_translate_vorbis_comment_to_id3() {
+       // Tag with only ASCII characters in the value
        let expected = Some(Frame::with_content("TALB", Content::Text(String::from("Polychrome"))));
        let actual = translate_vorbis_comment_to_id3(&String::from("Album"), &String::from("Polychrome"));
        assert_eq!(expected, actual);
 
+       // Tag with non-ASCII characters in the value
+       let expected = Some(Frame::with_content("TALB", Content::Text(String::from("नमस्ते"))));
+       let actual = translate_vorbis_comment_to_id3(&String::from("Album"), &String::from("नमस्ते"));
+       assert_eq!(expected, actual);
+
+       // Tag with no mapping
        let expected = None;
        let actual = translate_vorbis_comment_to_id3(&String::from("Not a vorbis comment"), &String::from(""));
        assert_eq!(expected, actual);
