@@ -27,6 +27,12 @@ impl Lame {
         })
     }
 
+    pub fn get_in_samplerate(&mut self) -> u32 {
+        unsafe {
+            lame_sys::lame_get_in_samplerate(self.context) as u32
+        }
+    }
+
     pub fn set_in_samplerate(&mut self, samplerate: u32) -> Result<(), Error> {
         handle_return_code(unsafe {
             lame_sys::lame_set_in_samplerate(self.context, samplerate as c_int)
@@ -43,6 +49,12 @@ impl Lame {
         handle_return_code(unsafe {
             lame_sys::lame_set_VBR_q(self.context, quality as c_int)
         })
+    }
+
+    pub fn get_vbr_max_bitrate(&mut self) -> u32 {
+        unsafe {
+            lame_sys::lame_get_VBR_max_bitrate_kbps(self.context) as u32
+        }
     }
 
     pub fn set_vbr_max_bitrate(&mut self, bitrate: u32) -> Result<(), Error> {

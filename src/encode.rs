@@ -13,7 +13,10 @@ use claxon::metadata::{StreamInfo, Tags};
 use crate::lame::Lame;
 use lame_sys::vbr_mode::vbr_mtrh;
 
-/// The `Encode` trait allows for encoding data from a reader to mp3.
+// From LAME
+const MAX_VBR_FRAME_SIZE: u64 = 2880;
+
+/// The `Encode` trait allows for encoding audio data from a reader to a specific format.
 ///
 /// Implementors of the `Encode` trait define an [`encode()`] method that describes the
 /// specifics of converting a particular filetype to mp3.
@@ -36,21 +39,21 @@ pub trait Encode<R: io::Read> {
             }
         }
 
-        let mp3_buffer = self.get_output_buffer_mut();
-        let encoded_mp3_chunk_size = min(size as usize, mp3_buffer.len());
-        let mut encoded_mp3_chunk: Vec<u8> = Vec::with_capacity(min(size as usize, mp3_buffer.len()));
-        for _i in 0..encoded_mp3_chunk_size {
-            encoded_mp3_chunk.push(mp3_buffer.pop_front().unwrap());
+        let output_buffer = self.get_output_buffer_mut();
+        let encoded_chunk_size = min(size as usize, output_buffer.len());
+        let mut encoded_chunk: Vec<u8> = Vec::with_capacity(min(size as usize, output_buffer.len()));
+        for _i in 0..encoded_chunk_size {
+            encoded_chunk.push(output_buffer.pop_front().unwrap());
         }
 
-        encoded_mp3_chunk
+        encoded_chunk
     }
 
     /// Encodes the next chunk of data to mp3 v0.
     /// Returns the length of encoded data written to the mp3_buffer.
     fn encode(&mut self, size: usize) -> usize;
 
-    /// Estimate the final encoded file size.
+    /// Estimate the final encoded file size. This should return an upper bound in bytes.
     fn calculate_size(&mut self) -> u64;
 
     /// Get the output buffer used to temporarily store encoded mp3 data.
@@ -192,7 +195,14 @@ impl Encode<File> for FlacToMp3Encoder<File> {
     }
 
     fn calculate_size(&mut self) -> u64 {
-        unimplemented!();
+        let tag_size = self.tag_buffer.get_ref().len();
+        let sample_count = self.stream_info.samples.expect("Unable to get PCM sample count");
+        let mut lame = self.lame_wrapper.lame.lock().unwrap();
+        let bitrate = lame.get_vbr_max_bitrate();
+        let samplerate = lame.get_vbr_max_bitrate();
+
+        tag_size as u64 + MAX_VBR_FRAME_SIZE
+            + ((sample_count * 144 * u64::from(bitrate) * 10) / (u64::from(samplerate) / 100))
     }
 
     fn get_output_buffer(&self) -> &VecDeque<u8> {
