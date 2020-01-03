@@ -10,6 +10,7 @@ pub mod lame;
 pub mod libc_util;
 pub mod mp3v0fs;
 pub mod tags;
+pub mod inode;
 
 use crate::mp3v0fs::Mp3V0Fs;
 
