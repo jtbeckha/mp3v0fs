@@ -1,34 +1,25 @@
 use std::collections::HashMap;
-use std::ffi::{CStr, OsStr, OsString};
-use std::fs::File;
-use std::io;
-use std::os::unix::ffi::{OsStrExt, OsStringExt};
+use std::ffi::{OsStr, OsString};
+use std::fs::{File, read_dir};
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::vec::Vec;
-use time::Timespec;
 
-use super::libc_util::libc_extras::libc;
-use super::libc_util::libc_wrappers;
-
-use fuse_mt::*;
 use crate::encode::{Encode, FlacToMp3Encoder};
 use claxon::FlacReader;
 use std::sync::{Arc, Mutex};
-use fuse::{Filesystem, ReplyOpen, ReplyAttr, ReplyData, ReplyXattr, ReplyEmpty, Request, ReplyEntry};
+use fuse::{Filesystem, FileAttr, FileType, ReplyOpen, ReplyAttr, ReplyData, ReplyXattr, ReplyEmpty, Request, ReplyEntry, ReplyDirectory};
+use crate::inode::{InodeTable, Inode};
+use std::time::Duration;
 
 const FLAC: &'static str = "flac";
 const MP3: &'static str = "mp3";
-const TTL: Timespec = Timespec { sec: 1, nsec: 0 };
-
-/// Set of FileTypes this FS is concerned with. Everything else will be filtered out of
-/// directory listings.
-const RELEVANT_FILETYPES: [&'static FileType; 3] = [
-    &FileType::Directory, &FileType::RegularFile, &FileType::Symlink
-];
+const TTL: Duration = Duration::from_secs(1);
 
 pub struct Mp3V0Fs {
     pub target: OsString,
-    fds: Arc<Mutex<HashMap<u64, FlacToMp3Encoder<File>>>>
+    fds: Arc<Mutex<HashMap<u64, FlacToMp3Encoder<File>>>>,
+    inode_table: InodeTable
 }
 
 impl Mp3V0Fs {
@@ -36,7 +27,8 @@ impl Mp3V0Fs {
     pub fn new(target: OsString) -> Mp3V0Fs {
         Mp3V0Fs {
             target,
-            fds: Arc::new(Mutex::new(HashMap::new()))
+            fds: Arc::new(Mutex::new(HashMap::new())),
+            inode_table: InodeTable::new()
         }
     }
 
@@ -56,241 +48,58 @@ impl Mp3V0Fs {
             .into_os_string();
     }
 
-    fn stat_real(&self, path: &Path) -> io::Result<FileAttr> {
-        let real: OsString = self.real_path(path);
-        debug!("stat_real: {:?}", real);
+    //TODO handle mp3 passthrough
+    fn fuse_path(&self, real_path: &Path) -> PathBuf {
+        let partial = real_path.strip_prefix(&self.target).unwrap();
 
-        match libc_wrappers::lstat(real) {
-            Ok(stat) => {
-                Ok(stat_to_fuse(stat))
-            },
-            Err(e) => {
-                let err = io::Error::from_raw_os_error(e);
-                error!("lstat({:?}): {}", path, err);
-                Err(err)
-            }
-        }
-    }
-}
-
-impl FilesystemMT for Mp3V0Fs {
-
-    fn init(&self, _req: RequestInfo) -> ResultEmpty {
-        debug!("init");
-        Ok(())
+        return PathBuf::from("/")
+            .join(partial);
     }
 
-    fn destroy(&self, _req: RequestInfo) {
-        debug!("destroy");
-    }
-
-    fn getattr(&self, _req: RequestInfo, path: &Path, fh: Option<u64>) -> ResultEntry {
-        debug!("getattr: {:?}", path);
-
-        if let Some(fh) = fh {
-            match libc_wrappers::fstat(fh) {
-                Ok(stat) => Ok((TTL, stat_to_fuse(stat))),
-                Err(e) => Err(e)
-            }
-        } else {
-            match self.stat_real(path) {
-                Ok(attr) => Ok((TTL, attr)),
-                Err(e) => Err(e.raw_os_error().unwrap())
-            }
-        }
-    }
-
-    fn readlink(&self, _req: RequestInfo, path: &Path) -> ResultData {
-        debug!("readlink: {:?}", path);
-
-        let real = self.real_path(path);
-        match ::std::fs::read_link(real) {
-            Ok(target) => Ok(target.into_os_string().into_vec()),
-            Err(e) => Err(e.raw_os_error().unwrap()),
-        }
-    }
-
-    fn open(&self, _req: RequestInfo, path: &Path, flags: u32) -> ResultOpen {
-        debug!("open: {:?} flags={:#x}", path, flags);
-
-        let real = self.real_path(path);
-        match libc_wrappers::open(real.to_owned(), flags as libc::c_int) {
-            Ok(fh) => {
-                let mut fds = self.fds.lock().unwrap();
-
-                if !fds.contains_key(&fh) {
-                    let flac_reader = match FlacReader::open(real.to_owned()) {
-                        Ok(flac_reader) => flac_reader,
-                        Err(err) => panic!("Error opening file {}. {}", path.to_str().unwrap(), err)
-                    };
-
-                    let encoder = FlacToMp3Encoder::new(flac_reader);
-
-                    debug!("adding fh={} to fds", fh);
-                    fds.insert(fh, encoder);
-                }
-
-                Ok((fh, flags))
-            },
-            Err(e) => {
-                error!("open({:?}): {}", path, io::Error::from_raw_os_error(e));
-                Err(e)
-            }
-        }
-    }
-
-    fn read(&self, _req: RequestInfo, path: &Path, fh: u64, offset: u64, size: u32, result: impl FnOnce(Result<&[u8], libc::c_int>)) {
-        debug!{"read: {:?} offset {:?}", path, offset};
-
-        let mut fds = self.fds.lock().unwrap();
-        let encoder = match fds.get_mut(&fh) {
-            Some(encoder) => encoder,
-            None => panic!("Failed to read encoder from fds")
+    fn stat(&self, ino: Inode, fuse_path: &PathBuf) -> Result<FileAttr, std::io::Error> {
+        let real_path: OsString = self.real_path(fuse_path);
+        let metadata = match std::fs::metadata(real_path) {
+            Ok(metadata) => metadata,
+            Err(e) => return Err(e)
         };
 
-        let data = encoder.read(size);
+        let fuse_filetype = match adapt_filetype(metadata.file_type()) {
+            Some(fuse_filetype) => fuse_filetype,
+            //TODO error code enum
+            None => return Err(std::io::Error::last_os_error())
+        };
 
-        result(Ok(&data))
-    }
-
-    fn release(&self, _req: RequestInfo, path: &Path, fh: u64, _flags: u32, _lock_owner: u64, _flush: bool) -> ResultEmpty {
-        debug!("release: {:?}", path);
-
-        let mut fds = self.fds.lock().unwrap();
-        if fds.contains_key(&fh) {
-            debug!("removing fh={} from fds", fh);
-            fds.remove(&fh);
-        }
-
-        Ok(())
-    }
-
-    fn opendir(&self, _req: RequestInfo, path: &Path, flags: u32) -> ResultOpen {
-        let real = self.real_path(path);
-        debug!("opendir: {:?} (flags = {:#o})", real, flags);
-        match libc_wrappers::opendir(real) {
-            Ok(fh) => Ok((fh, 0)),
-            Err(e) => {
-                let ioerr = io::Error::from_raw_os_error(e);
-                error!("opendir({:?}): {}", path, ioerr);
-                Err(e)
-            }
-        }
-    }
-
-    fn readdir(&self, _req: RequestInfo, path: &Path, fh: u64) -> ResultReaddir {
-        debug!("readdir: {:?}", path);
-        let mut entries: Vec<DirectoryEntry> = vec![];
-
-        if fh == 0 {
-            error!("readdir: missing fh");
-            return Err(libc::EINVAL);
-        }
-
-        loop {
-            match libc_wrappers::readdir(fh) {
-                Ok(Some(entry)) => {
-                    let name_c = unsafe { CStr::from_ptr(entry.d_name.as_ptr()) };
-                    let name = OsStr::from_bytes(name_c.to_bytes()).to_owned();
-                    let entry_path = PathBuf::from(path).join(&name);
-                    let real_path = self.real_path(&entry_path);
-
-                    let filetype = match entry.d_type {
-                        libc::DT_DIR => FileType::Directory,
-                        libc::DT_REG => FileType::RegularFile,
-                        libc::DT_LNK => FileType::Symlink,
-                        libc::DT_BLK => FileType::BlockDevice,
-                        libc::DT_CHR => FileType::CharDevice,
-                        libc::DT_FIFO => FileType::NamedPipe,
-                        libc::DT_SOCK => {
-                            warn!("FUSE doesn't support Socket file type; translating to NamedPipe instead.");
-                            FileType::NamedPipe
-                        },
-                        _ => {
-                            match libc_wrappers::lstat(real_path.clone()) {
-                                Ok(stat64) => mode_to_filetype(stat64.st_mode),
-                                Err(errno) => {
-                                    let ioerr = io::Error::from_raw_os_error(errno);
-                                    panic!("lstat failed after readdir_r gave no file type for {:?}: {}",
-                                           entry_path, ioerr);
-                                }
-                            }
-                        }
-                    };
-
-                    if !RELEVANT_FILETYPES.contains(&&filetype) {
-                        continue;
-                    }
-
-                    let fuse_file_name: OsString = match filetype {
-                        FileType::RegularFile | FileType::Symlink => {
-                            let file_extension = parse_extension(real_path.to_str().unwrap());
-                            match file_extension.as_ref() {
-                                FLAC => OsString::from(replace_extension(name.to_str().unwrap(), MP3)),
-                                // TODO implement passthrough reads for pre-existing MP3s
-                                // MP3 => name,
-                                // Filter out any filetypes we don't care about
-                                _ => continue
-                            }
-                        },
-                        _ => name
-                    };
-
-                    entries.push(DirectoryEntry {
-                        name: fuse_file_name,
-                        kind: filetype
-                    });
-                },
-                Ok(None) => { break; },
-                Err(e) => {
-                    error!("readdir: {:?}: {}", path, e);
-                    return Err(e);
-                }
-            }
-        }
-
-        Ok(entries)
-    }
-
-    fn getxattr(&self, _req: RequestInfo, path: &Path, name: &OsStr, size: u32) -> ResultXattr {
-        debug!("getxattr: {:?} {:?} {}", path, name, size);
-
-        let real = self.real_path(path);
-
-        if size > 0 {
-            let mut data = Vec::<u8>::with_capacity(size as usize);
-            unsafe { data.set_len(size as usize) };
-            let nread = libc_wrappers::lgetxattr(real, name.to_owned(), data.as_mut_slice())?;
-            data.truncate(nread);
-            Ok(Xattr::Data(data))
-        } else {
-            let nbytes = libc_wrappers::lgetxattr(real, name.to_owned(), &mut [])?;
-            Ok(Xattr::Size(nbytes as u32))
-        }
-    }
-
-    fn listxattr(&self, _req: RequestInfo, path: &Path, size: u32) -> ResultXattr {
-        debug!("listxattr: {:?}", path);
-
-        let real = self.real_path(path);
-
-        if size > 0 {
-            let mut data = Vec::<u8>::with_capacity(size as usize);
-            unsafe { data.set_len(size as usize) };
-            let nread = libc_wrappers::llistxattr(real, data.as_mut_slice())?;
-            data.truncate(nread);
-            Ok(Xattr::Data(data))
-        } else {
-            let nbytes = libc_wrappers::llistxattr(real, &mut[])?;
-            Ok(Xattr::Size(nbytes as u32))
-        }
+        Ok(fuse::FileAttr {
+            ino,
+            // TODO calculate
+            size: metadata.size(),
+            blocks: metadata.blocks(),
+            //TODO error checking
+            atime: metadata.accessed().unwrap(),
+            mtime: metadata.modified().unwrap(),
+            ctime: metadata.modified().unwrap(),
+            crtime: metadata.modified().unwrap(),
+            kind: fuse_filetype,
+            perm: metadata.mode() as u16,
+            nlink: metadata.nlink() as u32,
+            uid: metadata.uid(),
+            gid: metadata.gid(),
+            rdev: metadata.rdev() as u32,
+            flags: 0
+        })
     }
 }
 
 impl Filesystem for Mp3V0Fs {
-    fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, _reply: ReplyEntry) {
-        debug!("lookup: {:?}, {:?}", parent, name);
-        unimplemented!()
+    fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
+        let (inode, path) = self.inode_table.lookup(parent, name);
+        debug!("lookup: {:?}, {:?}", inode, path);
+        //TODO convert .flac to .mp3
+
+        match self.stat(inode, &path) {
+            Ok(attr) => reply.entry(&self::TTL, &attr, 1),
+            Err(_e) => reply.error(1)
+        };
     }
 
     fn forget(&mut self, _req: &Request, ino: u64, nlookup: u64) {
@@ -298,9 +107,17 @@ impl Filesystem for Mp3V0Fs {
         unimplemented!()
     }
 
-    fn getattr(&mut self, _req: &Request, ino: u64, _reply: ReplyAttr) {
-        debug!("getattr: {:?}", ino);
-        unimplemented!()
+    fn getattr(&mut self, _req: &Request, ino: u64, reply: ReplyAttr) {
+        let path = match self.inode_table.get_path(ino) {
+            Some(path) => path,
+            None => return reply.error(1)
+        }.to_owned();
+        debug!("getattr: {:?}", path);
+
+        match self.stat(ino, &path) {
+            Ok(attr) => reply.attr(&self::TTL, &attr),
+            Err(_e) => reply.error(1)
+        };
     }
 
     fn readlink(&mut self, _req: &Request, ino: u64, _reply: ReplyData) {
@@ -309,14 +126,49 @@ impl Filesystem for Mp3V0Fs {
         unimplemented!()
     }
 
-    fn open(&mut self, _req: &Request, ino: u64, flags: u32, _reply: ReplyOpen) {
-        debug!("open: {:?}, {:?}", ino, flags);
-        unimplemented!()
+    fn open(&mut self, _req: &Request, ino: u64, flags: u32, reply: ReplyOpen) {
+        let path = match self.inode_table.get_path(ino) {
+            Some(path) => path,
+            None => return reply.error(1)
+        }.to_owned();
+        debug!("open: {:?}, {:?}", path, flags);
+
+        let real_path = self.real_path(&path);
+        let mut fds = self.fds.lock().unwrap();
+
+        if !fds.contains_key(&ino) {
+            let flac_reader = match FlacReader::open(real_path.to_owned()) {
+                Ok(flac_reader) => flac_reader,
+                Err(err) => panic!("Error opening file {}. {}", path.to_str().unwrap(), err)
+            };
+
+            let encoder = FlacToMp3Encoder::new(flac_reader);
+
+            debug!("adding ino={} to fds", ino);
+            fds.insert(ino, encoder);
+        }
+
+        // inode number is always be unique per file so should be an acceptable replacement for the
+        // fh u64 expected in ReplyOpen
+        reply.opened(ino, flags);
     }
 
-    fn read(&mut self, _req: &Request, ino: u64, fh: u64, offset: i64, size: u32, _reply: ReplyData) {
-        debug!("read: {:?}, {:?}, {:?}, {:?}", ino, fh, offset, size);
-        unimplemented!()
+    fn read(&mut self, _req: &Request, ino: u64, fh: u64, offset: i64, size: u32, reply: ReplyData) {
+        let path = match self.inode_table.get_path(ino) {
+            Some(path) => path,
+            // TODO error code enum
+            None => return reply.error(1)
+        }.to_owned();
+        debug!("read: {:?}, {:?}, {:?}, {:?}", fh, path, offset, size);
+
+        let mut fds = self.fds.lock().unwrap();
+        let encoder = match fds.get_mut(&fh) {
+            Some(encoder) => encoder,
+            None => panic!("Failed to read encoder from fds")
+        };
+
+        let data = encoder.read(size);
+        reply.data(&data);
     }
 
     fn release(&mut self, _req: &Request, ino: u64, fh: u64, flags: u32, lock_owner: u64, flush: bool, _reply: ReplyEmpty) {
@@ -324,9 +176,72 @@ impl Filesystem for Mp3V0Fs {
         unimplemented!()
     }
 
-    fn opendir(&mut self, _req: &Request, ino: u64, flags: u32, _reply: ReplyOpen) {
-        debug!("opendir: {:?}, {:?}", ino, flags);
-        unimplemented!()
+    fn opendir(&mut self, _req: &Request, ino: u64, flags: u32, reply: ReplyOpen) {
+        let path = match self.inode_table.get_path(ino) {
+            Some(path) => path,
+            // TODO error code enum
+            None => return reply.error(1)
+        }.to_owned();
+        debug!("opendir: {:?}, {:?}", path, flags);
+
+        // inode number is always be unique per file so should be an acceptable replacement for the
+        // fh u64 expected in ReplyOpen
+        reply.opened(ino, flags);
+    }
+
+    //TODO handle chunking responses
+    fn readdir(&mut self, _req: &Request, ino: u64, _fh: u64, _offset: i64, mut reply: ReplyDirectory) {
+        let path = match self.inode_table.get_path(ino) {
+            Some(path) => path,
+            // TODO error code enum
+            None => {
+                reply.error(1);
+                return;
+            }
+        }.to_owned();
+        debug!("readdir: {:?}", path);
+
+        let real_path = self.real_path(&path);
+        let entries = match read_dir(real_path) {
+            Ok(read_dir) => read_dir,
+            Err(_e) => {
+                //TODO error code enum
+                reply.error(1);
+                return;
+            }
+        };
+
+        for dir_entry_result in entries {
+            if dir_entry_result.is_err() {
+                debug!("error reading dir_entry: {}", dir_entry_result.err().unwrap());
+                continue;
+            }
+            let dir_entry = dir_entry_result.unwrap();
+
+            let fuse_path = self.fuse_path(dir_entry.path().as_path());
+            let inode = match self.inode_table.get_inode(&fuse_path) {
+                Some(inode) => inode,
+                None => continue
+            };
+
+            let fuse_filetype = match dir_entry.file_type() {
+                Ok(fs_filetype) => match adapt_filetype(fs_filetype) {
+                    Some(fuse_filetype) => fuse_filetype,
+                    None => continue
+                },
+                Err(_e) => {
+                    //TODO error code enum
+                    reply.error(1);
+                    return;
+                }
+            };
+
+            let fuse_filename = parse_name(fuse_path.as_path().to_str().unwrap());
+
+            reply.add(inode, 0, fuse_filetype, fuse_filename);
+        }
+
+        reply.ok();
     }
 
     fn releasedir(&mut self, _req: &Request, ino: u64, fh: u64, flags: u32, _reply: ReplyEmpty) {
@@ -346,40 +261,33 @@ impl Filesystem for Mp3V0Fs {
     }
 }
 
-fn mode_to_filetype(mode: libc::mode_t) -> FileType {
-    match mode & libc::S_IFMT {
-        libc::S_IFDIR => FileType::Directory,
-        libc::S_IFREG => FileType::RegularFile,
-        libc::S_IFLNK => FileType::Symlink,
-        libc::S_IFBLK => FileType::BlockDevice,
-        libc::S_IFCHR => FileType::CharDevice,
-        libc::S_IFIFO  => FileType::NamedPipe,
-        libc::S_IFSOCK => FileType::Socket,
-        _ => { panic!("unknown file type"); }
+fn adapt_filetype(fs_filetype: std::fs::FileType) -> Option<FileType> {
+    if fs_filetype.is_file() {
+        return Some(FileType::RegularFile);
+    } else if fs_filetype.is_dir() {
+        return Some(FileType::Directory);
+    } else if fs_filetype.is_symlink() {
+        return Some(FileType::Symlink);
+    } else {
+        return None;
     }
 }
 
-fn stat_to_fuse(stat: libc::stat64) -> FileAttr {
-    // st_mode encodes both the kind and the permissions
-    let kind = mode_to_filetype(stat.st_mode);
-    let perm = (stat.st_mode & 0o7777) as u16;
-
-    FileAttr {
-        //TODO estimate size
-        size: stat.st_size as u64 * 2,
-        blocks: stat.st_blocks as u64,
-        atime: Timespec { sec: stat.st_atime as i64, nsec: stat.st_atime_nsec as i32 },
-        mtime: Timespec { sec: stat.st_mtime as i64, nsec: stat.st_mtime_nsec as i32 },
-        ctime: Timespec { sec: stat.st_ctime as i64, nsec: stat.st_ctime_nsec as i32 },
-        crtime: Timespec { sec: 0, nsec: 0 },
-        kind,
-        perm,
-        nlink: stat.st_nlink as u32,
-        uid: stat.st_uid,
-        gid: stat.st_gid,
-        rdev: stat.st_rdev as u32,
-        flags: 0,
+/// Parses out the name of a file given a path.
+///
+/// # Examples (TODO make these tests)
+///
+/// ```
+/// assert_eq!(parse_name("/home/user/test.flac"), "test.flac");
+/// assert_eq!(parse_name("test.flac"), "test.flac");
+/// ```
+fn parse_name(path: &str) -> String {
+    let path_components: Vec<&str> = path.split("/").collect();
+    if path_components.len() == 0 {
+        return String::from("")
     }
+
+    path_components[path_components.len() - 1].to_owned()
 }
 
 /// Parse out the file extension given the path to a file.

@@ -39,9 +39,9 @@ impl InodeTable {
         }
     }
 
-    /// Returns the inode number assigned to the provided parent_ino/name combination
-    pub fn lookup(&mut self, parent_ino: Inode, name: &OsStr) -> Inode {
-        let parent_path = match self.paths_by_inode.get(&parent_ino) {
+    /// Returns the inode number and path assigned to the provided parent_ino/name combination.
+    pub fn lookup(&mut self, parent_inode: Inode, name: &OsStr) -> (Inode, PathBuf) {
+        let parent_path = match self.paths_by_inode.get(&parent_inode) {
             Some(path) => path,
             None => panic!("Attempted lookup on an unknown parent_ino")
         };
@@ -51,17 +51,17 @@ impl InodeTable {
         match self.inodes_by_path.get_mut(&path) {
             Some(inode) => {
                 inode.lookups += 1;
-                inode.inode
+                (inode.inode, path.clone())
             },
             None => {
                 let inode = self.next_inode;
-                self.inodes_by_path.insert(path, InodeTableEntry {
+                self.inodes_by_path.insert(path.clone(), InodeTableEntry {
                     inode,
                     lookups: 1
                 });
 
                 self.next_inode += 1;
-                inode
+                (inode, path.clone())
             }
         }
     }
@@ -87,6 +87,20 @@ impl InodeTable {
         if inode_entry.lookups <= 0 {
             self.inodes_by_path.remove(path);
             self.paths_by_inode.remove(&ino);
+        }
+    }
+
+    /// Gets the path of the provided inode number.
+    pub fn get_path(&mut self, inode: Inode) -> Option<&PathBuf> {
+        self.paths_by_inode.get(&inode)
+    }
+
+    /// Gets the inode of the provided path.
+    /// Path should be relative to the mountpoint.
+    pub fn get_inode(&mut self, path: &PathBuf) -> Option<Inode> {
+        match self.inodes_by_path.get(path) {
+            Some(inode_table_entry) => Some(inode_table_entry.inode),
+            None => None
         }
     }
 }

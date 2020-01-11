@@ -21,9 +21,7 @@ use fuse::BackgroundSession;
 pub fn run(target: &OsString, mountpoint: &OsString, fuse_args: &Vec<&OsStr>) -> Result<()> {
     let filesystem = Mp3V0Fs::new(target.clone());
 
-    fuse::mount(
-        fuse_mt::FuseMT::new(filesystem, 1), mountpoint, fuse_args
-    )
+    fuse::mount(filesystem, mountpoint, fuse_args)
 }
 
 pub fn run_async<'a>(target: &OsString, mountpoint: &OsString, fuse_args: &Vec<&OsStr>) -> Result<BackgroundSession<'a>> {
@@ -31,7 +29,7 @@ pub fn run_async<'a>(target: &OsString, mountpoint: &OsString, fuse_args: &Vec<&
 
     unsafe {
         fuse::spawn_mount(
-            fuse_mt::FuseMT::new(filesystem, 1), mountpoint, fuse_args
+            filesystem, mountpoint, fuse_args
         )
     }
 }
