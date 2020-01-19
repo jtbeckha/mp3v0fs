@@ -52,8 +52,13 @@ impl Mp3V0Fs {
     fn fuse_path(&self, real_path: &Path) -> PathBuf {
         let partial = real_path.strip_prefix(&self.target).unwrap();
 
-        return PathBuf::from("/")
-            .join(partial);
+        let fuse_path = PathBuf::from("/");
+
+        match parse_extension(partial.to_str().unwrap()).as_ref() {
+            // All FLACs should look like MP3s under the mountpoint
+            FLAC => fuse_path.join(replace_extension(partial.to_str().unwrap(), MP3)),
+            _ => fuse_path.join(partial)
+        }
     }
 
     fn stat(&self, ino: Inode, fuse_path: &PathBuf) -> Result<FileAttr, std::io::Error> {
@@ -250,8 +255,6 @@ impl Filesystem for Mp3V0Fs {
                 break;
             }
         }
-
-        info!("About to return response to readdir={:?}", reply);
 
         reply.ok();
     }
