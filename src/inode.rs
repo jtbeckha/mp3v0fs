@@ -105,13 +105,13 @@ impl InodeTable {
     }
 
     /// Gets the path of the provided inode number.
-    pub fn get_path(&mut self, inode: Inode) -> Option<&PathBuf> {
+    pub fn get_path(&self, inode: Inode) -> Option<&PathBuf> {
         self.paths_by_inode.get(&inode)
     }
 
     /// Gets the inode of the provided path.
     /// Path should be relative to the mountpoint.
-    pub fn get_inode(&mut self, path: &PathBuf) -> Option<Inode> {
+    pub fn get_inode(&self, path: &PathBuf) -> Option<Inode> {
         match self.inodes_by_path.get(path) {
             Some(inode_table_entry) => Some(inode_table_entry.inode),
             None => None

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
-use std::ffi::{OsStr, OsString};
+use std::ffi::{OsStr, OsString, CString};
 use std::fs::{File, read_dir};
+use std::os::unix::ffi::OsStringExt;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::vec::Vec;
@@ -230,7 +231,7 @@ impl Filesystem for Mp3V0Fs {
             let dir_entry = dir_entry_result.unwrap();
 
             let fuse_path = self.fuse_path(dir_entry.path().as_path());
-            let (inode, path) = self.inode_table.add_or_get(ino, fuse_path.clone().as_os_str());
+            let (inode, _path) = self.inode_table.add_or_get(ino, fuse_path.clone().as_os_str());
 
             let fuse_filetype = match dir_entry.file_type() {
                 Ok(fs_filetype) => match adapt_filetype(fs_filetype) {
@@ -257,9 +258,36 @@ impl Filesystem for Mp3V0Fs {
         reply.ok();
     }
 
-    fn getxattr(&mut self, _req: &Request, ino: u64, name: &OsStr, size: u32, _reply: ReplyXattr) {
-        debug!("getxattr: {:?}, {:?}, {:?}", ino, name, size);
-        unimplemented!()
+    fn getxattr(&mut self, _req: &Request, inode: u64, name: &OsStr, size: u32, reply: ReplyXattr) {
+        debug!("getxattr: {:?}, {:?}, {:?}", inode, name, size);
+
+        let path = match self.inode_table.get_path(inode) {
+            Some(path) => path,
+            None => return reply.error(1)
+        };
+        let real_path = self.real_path(path);
+
+        if size == 0 {
+            let size = unsafe {
+                libc::lgetxattr(
+                    CString::new(real_path.into_vec()).unwrap().as_ptr(),
+                    CString::new(name.to_os_string().into_vec()).unwrap().as_ptr(),
+                    (&mut []).as_mut_ptr(),
+                    0)
+            };
+            reply.size(size as u32);
+        } else {
+            let mut data = vec![0; size as usize];
+            let size = unsafe {
+                libc::lgetxattr(
+                    CString::new(real_path.into_vec()).unwrap().as_ptr(),
+                    CString::new(name.to_os_string().into_vec()).unwrap().as_ptr(),
+                    data.as_mut_ptr() as *mut libc::c_void,
+                    data.len())
+            };
+            data.truncate(size as usize);
+            reply.data(&data);
+        }
     }
 
     fn listxattr(&mut self, _req: &Request, ino: u64, size: u32, _reply: ReplyXattr) {
