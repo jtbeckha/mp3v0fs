@@ -92,9 +92,11 @@ impl Mp3V0Fs {
 
 impl Filesystem for Mp3V0Fs {
     fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
-        let (inode, path) = self.inode_table.lookup(parent, name);
+        let (inode, path) = self.inode_table.add_or_get(parent, name);
         debug!("lookup: {:?}, {:?}", inode, path);
         //TODO convert .flac to .mp3
+
+        self.inode_table.lookup(inode);
 
         match self.stat(inode, &path) {
             Ok(attr) => reply.entry(&self::TTL, &attr, 1),
@@ -171,9 +173,10 @@ impl Filesystem for Mp3V0Fs {
         reply.data(&data);
     }
 
-    fn release(&mut self, _req: &Request, ino: u64, fh: u64, flags: u32, lock_owner: u64, flush: bool, _reply: ReplyEmpty) {
+    fn release(&mut self, _req: &Request, ino: u64, fh: u64, flags: u32, lock_owner: u64, flush: bool, reply: ReplyEmpty) {
         debug!("release: {:?}, {:?}, {:?}, {:?}, {:?}", ino, fh, flags, lock_owner, flush);
-        unimplemented!()
+        //TODO implement
+        reply.ok();
     }
 
     fn opendir(&mut self, _req: &Request, ino: u64, flags: u32, reply: ReplyOpen) {
@@ -189,8 +192,13 @@ impl Filesystem for Mp3V0Fs {
         reply.opened(ino, flags);
     }
 
-    //TODO handle chunking responses
-    fn readdir(&mut self, _req: &Request, ino: u64, _fh: u64, _offset: i64, mut reply: ReplyDirectory) {
+    fn readdir(&mut self, _req: &Request, ino: u64, _fh: u64, offset: i64, mut reply: ReplyDirectory) {
+        //TODO handle chunking responses
+        if offset > 0 {
+            reply.ok();
+            return;
+        }
+
         let path = match self.inode_table.get_path(ino) {
             Some(path) => path,
             // TODO error code enum
@@ -211,7 +219,7 @@ impl Filesystem for Mp3V0Fs {
             }
         };
 
-        for dir_entry_result in entries {
+        for (index, dir_entry_result) in entries.enumerate() {
             if dir_entry_result.is_err() {
                 debug!("error reading dir_entry: {}", dir_entry_result.err().unwrap());
                 continue;
@@ -219,10 +227,7 @@ impl Filesystem for Mp3V0Fs {
             let dir_entry = dir_entry_result.unwrap();
 
             let fuse_path = self.fuse_path(dir_entry.path().as_path());
-            let inode = match self.inode_table.get_inode(&fuse_path) {
-                Some(inode) => inode,
-                None => continue
-            };
+            let (inode, path) = self.inode_table.add_or_get(ino, fuse_path.clone().as_os_str());
 
             let fuse_filetype = match dir_entry.file_type() {
                 Ok(fs_filetype) => match adapt_filetype(fs_filetype) {
@@ -238,16 +243,17 @@ impl Filesystem for Mp3V0Fs {
 
             let fuse_filename = parse_name(fuse_path.as_path().to_str().unwrap());
 
-            reply.add(inode, 0, fuse_filetype, fuse_filename);
+            // Start offset at 1 to avoid looping forever on directory with only 1 entry
+            let buffer_full = reply.add(inode, 1 + index as i64, fuse_filetype, fuse_filename);
+            if buffer_full {
+                debug!("readdir reply buffer full");
+                break;
+            }
         }
 
-        reply.ok();
-    }
+        info!("About to return response to readdir={:?}", reply);
 
-    fn releasedir(&mut self, _req: &Request, ino: u64, fh: u64, flags: u32, _reply: ReplyEmpty) {
-        //TODO needed?
-        debug!("releasedir: {:?}, {:?}, {:?}", ino, fh, flags);
-        unimplemented!()
+        reply.ok();
     }
 
     fn getxattr(&mut self, _req: &Request, ino: u64, name: &OsStr, size: u32, _reply: ReplyXattr) {

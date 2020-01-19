@@ -39,26 +39,40 @@ impl InodeTable {
         }
     }
 
+    /// Increments the lookup count of the provided inode. Returns the updated lookup count.
+    pub fn lookup(&mut self, inode: Inode) -> u64 {
+        let path = match self.paths_by_inode.get(&inode) {
+            Some(path) => path,
+            None => panic!("Attempted lookup on an unknown inode")
+        };
+        let mut inode_entry = match self.inodes_by_path.get_mut(path) {
+            Some(inode_entry) => inode_entry,
+            None => panic!("Attempted lookup on an unknown path")
+        };
+        inode_entry.lookups += 1;
+        inode_entry.lookups
+    }
+
     /// Returns the inode number and path assigned to the provided parent_ino/name combination.
-    pub fn lookup(&mut self, parent_inode: Inode, name: &OsStr) -> (Inode, PathBuf) {
+    /// If the inode is not in the inode_table it will be added with a lookup count of 0.
+    pub fn add_or_get(&mut self, parent_inode: Inode, name: &OsStr) -> (Inode, PathBuf) {
         let parent_path = match self.paths_by_inode.get(&parent_inode) {
             Some(path) => path,
-            None => panic!("Attempted lookup on an unknown parent_ino")
+            None => panic!("Attempted lookup on an unknown parent_inode")
         };
-
 
         let path: PathBuf = [parent_path, &PathBuf::from(name)].iter().collect();
         match self.inodes_by_path.get_mut(&path) {
             Some(inode) => {
-                inode.lookups += 1;
                 (inode.inode, path.clone())
             },
             None => {
                 let inode = self.next_inode;
                 self.inodes_by_path.insert(path.clone(), InodeTableEntry {
                     inode,
-                    lookups: 1
+                    lookups: 0
                 });
+                self.paths_by_inode.insert(inode, path.clone());
 
                 self.next_inode += 1;
                 (inode, path.clone())
