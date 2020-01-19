@@ -48,7 +48,6 @@ impl Mp3V0Fs {
             .into_os_string();
     }
 
-    //TODO handle mp3 passthrough
     fn fuse_path(&self, real_path: &Path) -> PathBuf {
         let partial = real_path.strip_prefix(&self.target).unwrap();
 
@@ -99,7 +98,6 @@ impl Filesystem for Mp3V0Fs {
     fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
         let (inode, path) = self.inode_table.add_or_get(parent, name);
         debug!("lookup: {:?}, {:?}", inode, path);
-        //TODO convert .flac to .mp3
 
         self.inode_table.lookup(inode);
 
