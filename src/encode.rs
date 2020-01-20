@@ -26,12 +26,6 @@ pub trait Encode<R: io::Read> {
     /// This functions maintains state about where it is in the data stream, and returns
     /// the next chunk of encoded mp3 data on subsequent calls.
     fn read(&mut self, size: u32) -> Vec<u8> {
-        // Lazily set buffer capacity, since we don't know the chunk size that will be requested
-        // until read is called for the first time.
-        if self.get_output_buffer().capacity() == 0 {
-            self.get_output_buffer_mut().reserve((size * 2) as usize);
-        }
-
         while self.get_output_buffer().len() < size as usize {
             let encoded_length = self.encode(size as usize);
             if encoded_length == 0 {
@@ -45,12 +39,11 @@ pub trait Encode<R: io::Read> {
         for _i in 0..encoded_chunk_size {
             encoded_chunk.push(output_buffer.pop_front().unwrap());
         }
-
         encoded_chunk
     }
 
     /// Encodes the next chunk of data to mp3 v0.
-    /// Returns the length of encoded data written to the mp3_buffer.
+    /// Returns the length of encoded data written to the output_buffer.
     fn encode(&mut self, size: usize) -> usize;
 
     /// Estimate the final encoded file size. This should return an upper bound in bytes.
@@ -128,7 +121,6 @@ impl FlacToMp3Encoder<File> {
             output_buffer.push_back(byte.clone());
         }
     }
-
 }
 
 /// Implementation of Encoder that converts FLAC to MP3.
