@@ -77,7 +77,7 @@ impl Mp3V0Fs {
         Ok(fuse::FileAttr {
             ino,
             // TODO calculate
-            size: metadata.size(),
+            size: metadata.size() * 2,
             blocks: metadata.blocks(),
             //TODO error checking
             atime: metadata.accessed().unwrap(),
@@ -150,7 +150,7 @@ impl Filesystem for Mp3V0Fs {
 
             let encoder = FlacToMp3Encoder::new(flac_reader);
 
-            debug!("adding ino={} to fds", ino);
+            debug!("adding ino={} to fds for real_path={:?}", ino, real_path);
             fds.insert(ino, encoder);
         }
 

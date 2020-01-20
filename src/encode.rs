@@ -11,7 +11,8 @@ use std::cmp::min;
 use std::sync::{Arc, Mutex};
 use claxon::metadata::{StreamInfo, Tags};
 use crate::lame::Lame;
-use lame_sys::vbr_mode::vbr_mtrh;
+use lame_sys::vbr_mode::{vbr_mtrh, vbr_off};
+use lame_sys::lame_encode_buffer_long2;
 
 // From LAME
 const MAX_VBR_FRAME_SIZE: u64 = 2880;
@@ -39,6 +40,7 @@ pub trait Encode<R: io::Read> {
         for _i in 0..encoded_chunk_size {
             encoded_chunk.push(output_buffer.pop_front().unwrap());
         }
+
         encoded_chunk
     }
 
@@ -85,10 +87,12 @@ impl FlacToMp3Encoder<File> {
         let mut lame = Lame::new().expect("Failed to initialize LAME context");
         lame.set_channels(stream_info.channels).expect("Failed to call lame.set_channels()");
         lame.set_in_samplerate(stream_info.sample_rate).expect("Failed to call lame.set_in_samplerate()");
-        lame.set_vbr(vbr_mtrh).expect("Failed to call lame.set_vbr()");
-        lame.set_vbr_quality(0).expect("Failed to call lame.set_vbr_quality()");
-        lame.set_vbr_max_bitrate(320).expect("Failed to call lame.set_vbr_max_bitrate()");
-        lame.set_write_vbr_tag(true).expect("Failed to call lame.set_write_vbr_tag()");
+        lame.set_vbr(vbr_off).expect("Failed to call lame.set_vbr()");
+        lame.set_bitrate(320).expect("Failed to call lame.set_bitrate()");
+//        lame.set_vbr(vbr_mtrh).expect("Failed to call lame.set_vbr()");
+//        lame.set_vbr_quality(0).expect("Failed to call lame.set_vbr_quality()");
+//        lame.set_vbr_max_bitrate(320).expect("Failed to call lame.set_vbr_max_bitrate()");
+//        lame.set_write_vbr_tag(true).expect("Failed to call lame.set_write_vbr_tag()");
         lame.init_params().expect("Failed to call lame.init_params()");
 
         FlacToMp3Encoder {
@@ -127,21 +131,24 @@ impl FlacToMp3Encoder<File> {
 impl Encode<File> for FlacToMp3Encoder<File> {
 
     fn encode(&mut self, size: usize) -> usize {
-        let mut pcm_left: Vec<i32> = Vec::with_capacity(size);
-        let mut pcm_right: Vec<i32> = Vec::with_capacity(size);
+        let mut pcm_left: Vec<i16> = Vec::with_capacity(size);
+        let mut pcm_right: Vec<i16> = Vec::with_capacity(size);
 
         let mut should_flush = false;
 
         for _ in 0..size*2 {
-            match self.flac_samples.next() {
-                Some(l_frame) => pcm_left.push(l_frame.unwrap()),
+            let l_frame = match self.flac_samples.next() {
+                // TODO support 24-bit FLAC
+                Some(l_frame) => pcm_left.push(l_frame.unwrap() as i16),
                 None => {
                     should_flush = true;
                     break;
                 }
             };
+
             match self.flac_samples.next() {
-                Some(r_frame) => pcm_right.push(r_frame.unwrap()),
+                // TODO support 24-bit FLAC
+                Some(r_frame) => pcm_right.push(r_frame.unwrap() as i16),
                 None => {
                     should_flush = true;
                     break;

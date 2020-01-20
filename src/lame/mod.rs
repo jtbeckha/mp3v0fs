@@ -1,4 +1,4 @@
-use lame_sys::{lame_global_flags, vbr_mode};
+use lame_sys::{lame_global_flags, vbr_mode, lame_set_quality};
 use std::ptr;
 use std::os::raw::c_int;
 
@@ -39,6 +39,12 @@ impl Lame {
         })
     }
 
+    pub fn set_bitrate(&mut self, bitrate: u32) -> Result<(), Error> {
+        handle_return_code(unsafe {
+            lame_sys::lame_set_brate(self.context, bitrate as c_int)
+        })
+    }
+
     pub fn set_vbr(&mut self, mode: vbr_mode) -> Result<(), Error> {
         handle_return_code(unsafe {
             lame_sys::lame_set_VBR(self.context, mode)
@@ -75,10 +81,10 @@ impl Lame {
         })
     }
 
-    pub fn encode_buffer(&mut self, pcm_left: &mut[i32], pcm_right: &mut[i32], mp3_buffer: &mut[u8])
+    pub fn encode_buffer(&mut self, pcm_left: &mut[i16], pcm_right: &mut[i16], mp3_buffer: &mut[u8])
         -> Result<usize, EncodeError> {
         handle_encode_return_code(unsafe {
-            lame_sys::lame_encode_buffer_int(
+            lame_sys::lame_encode_buffer(
                 self.context, pcm_left.as_mut_ptr(), pcm_right.as_mut_ptr(),
                 pcm_left.len() as c_int, mp3_buffer.as_mut_ptr(), mp3_buffer.len() as c_int
             )
