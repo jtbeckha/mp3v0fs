@@ -259,12 +259,12 @@ impl Filesystem for Mp3V0Fs {
     }
 
     fn getxattr(&mut self, _req: &Request, inode: u64, name: &OsStr, size: u32, reply: ReplyXattr) {
-        debug!("getxattr: {:?}, {:?}, {:?}", inode, name, size);
-
         let path = match self.inode_table.get_path(inode) {
             Some(path) => path,
             None => return reply.error(1)
         };
+        debug!("getxattr: {:?}, {:?}, {:?}, {:?}", path, inode, name, size);
+
         let real_path = self.real_path(path);
 
         if size == 0 {
@@ -277,7 +277,7 @@ impl Filesystem for Mp3V0Fs {
             };
             reply.size(size as u32);
         } else {
-            let mut data = vec![0; size as usize];
+            let mut data: Vec<u8> = vec![0; size as usize];
             let size = unsafe {
                 libc::lgetxattr(
                     CString::new(real_path.into_vec()).unwrap().as_ptr(),
@@ -290,9 +290,34 @@ impl Filesystem for Mp3V0Fs {
         }
     }
 
-    fn listxattr(&mut self, _req: &Request, ino: u64, size: u32, _reply: ReplyXattr) {
-        debug!("listxattr: {:?}, {:?}", ino, size);
-        unimplemented!()
+    fn listxattr(&mut self, _req: &Request, inode: u64, size: u32, reply: ReplyXattr) {
+        let path = match self.inode_table.get_path(inode) {
+            Some(path) => path,
+            None => return reply.error(1)
+        };
+        debug!("listxattr: {:?}, {:?}, {:?}", path, inode, size);
+
+        let real_path = self.real_path(path);
+
+        if size == 0 {
+            let size = unsafe {
+                libc::llistxattr(
+                    CString::new(real_path.into_vec()).unwrap().as_ptr(),
+                    (&mut []).as_mut_ptr(),
+                    0)
+            };
+            reply.size(size as u32);
+        } else {
+            let mut data: Vec<u8> = vec![0; size as usize];
+            let size = unsafe {
+                libc::llistxattr(
+                    CString::new(real_path.into_vec()).unwrap().as_ptr(),
+                    data.as_mut_ptr() as *mut libc::c_char,
+                    data.len())
+            };
+            data.truncate(size as usize);
+            reply.data(&data);
+        }
     }
 }
 
