@@ -13,11 +13,17 @@ impl Lame {
         };
 
         if context == ptr::null_mut() {
-            return Err(Error::InitializationFailed)
+            Err(Error::InitializationFailed)
         } else {
-            return Result::Ok(Lame {
+            Result::Ok(Lame {
                 context
             });
+        }
+    }
+
+    pub fn get_channels(&mut self) -> u32 {
+        unsafe {
+            lame_sys::lame_get_num_channels(self.context) as u32
         }
     }
 
@@ -45,10 +51,22 @@ impl Lame {
         })
     }
 
+    pub fn get_vbr(&mut self) -> vbr_mode {
+        unsafe {
+            lame_sys::lame_get_VBR(self.context)
+        }
+    }
+
     pub fn set_vbr(&mut self, mode: vbr_mode) -> Result<(), Error> {
         handle_return_code(unsafe {
             lame_sys::lame_set_VBR(self.context, mode)
         })
+    }
+
+    pub fn get_vbr_quality(&mut self) -> u32 {
+        unsafe {
+            lame_sys::lame_get_VBR_q(self.context) as u32
+        }
     }
 
     pub fn set_vbr_quality(&mut self, quality: u32) -> Result<(), Error> {
@@ -67,6 +85,12 @@ impl Lame {
         handle_return_code(unsafe {
             lame_sys::lame_set_VBR_max_bitrate_kbps(self.context, bitrate as c_int)
         })
+    }
+
+    pub fn get_write_vbr_tag(&mut self) -> bool {
+        unsafe {
+            lame_sys::lame_get_bWriteVbrTag(self.context) != 0
+        }
     }
 
     pub fn set_write_vbr_tag(&mut self, toggle: bool) -> Result<(), Error> {
