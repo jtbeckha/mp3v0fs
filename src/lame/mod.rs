@@ -1,4 +1,4 @@
-use lame_sys::{lame_global_flags, vbr_mode, lame_set_quality};
+use lame_sys::{lame_global_flags, vbr_mode};
 use std::ptr;
 use std::os::raw::c_int;
 

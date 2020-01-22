@@ -12,7 +12,6 @@ use std::sync::{Arc, Mutex};
 use claxon::metadata::{StreamInfo, Tags};
 use crate::lame::Lame;
 use lame_sys::vbr_mode::{vbr_mtrh, vbr_off};
-use lame_sys::lame_encode_buffer_long2;
 
 // From LAME
 const MAX_VBR_FRAME_SIZE: u64 = 2880;
@@ -137,7 +136,7 @@ impl Encode<File> for FlacToMp3Encoder<File> {
         let mut should_flush = false;
 
         for _ in 0..size*2 {
-            let l_frame = match self.flac_samples.next() {
+            match self.flac_samples.next() {
                 // TODO support 24-bit FLAC
                 Some(l_frame) => pcm_left.push(l_frame.unwrap() as i16),
                 None => {
