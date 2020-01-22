@@ -335,12 +335,6 @@ fn adapt_filetype(fs_filetype: std::fs::FileType) -> Option<FileType> {
 
 /// Parses out the name of a file given a path.
 ///
-/// # Examples (TODO make these tests)
-///
-/// ```
-/// assert_eq!(parse_name("/home/user/test.flac"), "test.flac");
-/// assert_eq!(parse_name("test.flac"), "test.flac");
-/// ```
 fn parse_name(path: &str) -> String {
     let path_components: Vec<&str> = path.split("/").collect();
     if path_components.len() == 0 {
@@ -391,7 +385,16 @@ fn replace_extension(path: &str, replacement: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use crate::mp3v0fs::{MP3, parse_extension, replace_extension};
+    use crate::mp3v0fs::{MP3, parse_extension, parse_name, replace_extension};
+
+    #[test]
+    fn test_parse_name() {
+        assert_eq!("", parse_name(""));
+        assert_eq!("test", parse_name("test"));
+        assert_eq!("test", parse_name("/home/user/test"));
+        assert_eq!("test.flac", parse_name("test.flac"));
+        assert_eq!("test.flac", parse_name("/home/user/test.flac"));
+    }
 
     #[test]
     fn test_parse_extension() {
