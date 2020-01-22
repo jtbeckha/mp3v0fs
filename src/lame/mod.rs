@@ -17,7 +17,7 @@ impl Lame {
         } else {
             Result::Ok(Lame {
                 context
-            });
+            })
         }
     }
 
@@ -42,6 +42,18 @@ impl Lame {
     pub fn set_in_samplerate(&mut self, samplerate: u32) -> Result<(), Error> {
         handle_return_code(unsafe {
             lame_sys::lame_set_in_samplerate(self.context, samplerate as c_int)
+        })
+    }
+
+    pub fn get_out_samplerate(&mut self) -> u32 {
+        unsafe {
+            lame_sys::lame_get_out_samplerate(self.context) as u32
+        }
+    }
+
+    pub fn set_out_samplerate(&mut self, samplerate: u32) -> Result<(), Error> {
+        handle_return_code(unsafe {
+            lame_sys::lame_set_out_samplerate(self.context, samplerate as c_int)
         })
     }
 
