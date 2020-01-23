@@ -110,7 +110,7 @@ impl Filesystem for Mp3V0Fs {
 
     fn forget(&mut self, _req: &Request, ino: u64, nlookup: u64) {
         debug!("forget: {:?}, {:?}", ino, nlookup);
-        unimplemented!()
+        self.inode_table.forget(ino, nlookup);
     }
 
     fn getattr(&mut self, _req: &Request, ino: u64, reply: ReplyAttr) {
@@ -152,6 +152,10 @@ impl Filesystem for Mp3V0Fs {
 
             debug!("adding ino={} to fds for real_path={:?}", ino, real_path);
             fds.insert(ino, encoder);
+        } else {
+            // We do not support concurrent access of the same file
+            reply.error(1);
+            return;
         }
 
         // inode number is always be unique per file so should be an acceptable replacement for the
@@ -179,7 +183,13 @@ impl Filesystem for Mp3V0Fs {
 
     fn release(&mut self, _req: &Request, ino: u64, fh: u64, flags: u32, lock_owner: u64, flush: bool, reply: ReplyEmpty) {
         debug!("release: {:?}, {:?}, {:?}, {:?}, {:?}", ino, fh, flags, lock_owner, flush);
-        //TODO implement
+        let mut fds = self.fds.lock().unwrap();
+
+        match fds.remove(&ino) {
+            Some(_) => (),
+            None => info!("attempted to release non-existent key={}", ino)
+        }
+
         reply.ok();
     }
 
