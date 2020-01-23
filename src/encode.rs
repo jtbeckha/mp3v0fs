@@ -85,8 +85,8 @@ pub struct FlacToMp3Encoder<R: io::Read> {
 impl FlacToMp3Encoder<File> {
 
     pub fn new(flac_reader: FlacReader<File>) -> FlacToMp3Encoder<File> {
-//        6291456
-        let mut output_buffer = VecDeque::with_capacity(2048);
+        // 8MB
+        let mut output_buffer = VecDeque::with_capacity(8388608);
         // Initialize tags
         let flac_tags = flac_reader.tags();
         let tag_size = FlacToMp3Encoder::initialize_tags(flac_tags, &mut output_buffer);
