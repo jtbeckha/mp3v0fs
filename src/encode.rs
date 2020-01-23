@@ -14,7 +14,7 @@ use crate::lame::Lame;
 use lame_sys::vbr_mode::vbr_mtrh;
 
 // From LAME
-const MAX_VBR_FRAME_SIZE: u64 = 2880;
+const MAX_VBR_FRAME_SIZE: usize = 2880;
 
 /// The `Encode` trait allows for encoding audio data from a reader to a specific format.
 ///
@@ -186,7 +186,8 @@ impl Encode<File> for FlacToMp3Encoder<File> {
         // Collect remaining output of internal LAME buffers once we reach the end
         // of the PCM data stream
         let mut lame_buffer = vec![0; 7200];
-        let flush_output_length = match self.lame_wrapper.lame.lock().unwrap().encode_flush(&mut lame_buffer) {
+        let mut lame = self.lame_wrapper.lame.lock().unwrap();
+        let flush_output_length = match lame.encode_flush(&mut lame_buffer) {
             Ok(output_length) => output_length,
             Err(err) => panic!("Unexpected error flushing LAME buffers: {:?}", err)
         };
@@ -196,9 +197,13 @@ impl Encode<File> for FlacToMp3Encoder<File> {
             self.output_buffer.push_back(byte);
         }
 
-        //TODO write the actual vbr frame from LAME
-        for index in 0..64 {
-            std::mem::replace(&mut self.output_buffer[self.tag_size + index], 0xCC);
+        let mut vbr_buffer = vec![0; MAX_VBR_FRAME_SIZE];
+        let vbr_frame_length = lame.get_vbr_tag(&mut vbr_buffer);
+        vbr_buffer.truncate(vbr_frame_length);
+        let mut index = 0;
+        for byte in vbr_buffer {
+            std::mem::replace(&mut self.output_buffer[self.tag_size + index], byte);
+            index += 1;
         }
         self.encoding_finished = true;
 
@@ -211,7 +216,7 @@ impl Encode<File> for FlacToMp3Encoder<File> {
         let bitrate = lame.get_vbr_max_bitrate();
         let samplerate = lame.get_out_samplerate();
 
-        self.tag_size as u64 + MAX_VBR_FRAME_SIZE
+        self.tag_size as u64 + MAX_VBR_FRAME_SIZE as u64
             + ((sample_count * 144 * u64::from(bitrate) * 10) / (u64::from(samplerate) / 100))
     }
 

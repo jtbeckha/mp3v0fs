@@ -132,6 +132,12 @@ impl Lame {
             lame_sys::lame_encode_flush(self.context, mp3_buffer.as_mut_ptr(), mp3_buffer.len() as c_int)
         })
     }
+
+    pub fn get_vbr_tag(&mut self, vbr_buffer: &mut[u8]) -> usize {
+        unsafe {
+            lame_sys::lame_get_lametag_frame(self.context, vbr_buffer.as_mut_ptr(), vbr_buffer.len())
+        }
+    }
 }
 
 impl Drop for Lame {
