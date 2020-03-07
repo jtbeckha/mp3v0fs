@@ -344,7 +344,6 @@ fn adapt_filetype(fs_filetype: std::fs::FileType) -> Option<FileType> {
 }
 
 /// Parses out the name of a file given a path.
-///
 fn parse_name(path: &str) -> String {
     let path_components: Vec<&str> = path.split("/").collect();
     if path_components.len() == 0 {

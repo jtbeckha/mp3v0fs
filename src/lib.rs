@@ -3,7 +3,6 @@ extern crate libc;
 #[macro_use]
 extern crate log;
 extern crate simplelog;
-extern crate time;
 
 pub mod encode;
 pub mod lame;
