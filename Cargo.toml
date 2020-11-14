@@ -12,7 +12,7 @@ id3 = "0.3.0"
 libc = "0.2"
 lame-sys = "0.1.2"
 log = "^0.4.8"
-fuse = { git = "https://github.com/zargony/fuse-rs.git" }
+fuse = { git = "https://github.com/zargony/fuse-rs.git", rev = "42e29d964e2b24e32e21b179b77e4d0d0a0857ac" }
 simplelog = "0.5.0"
 
 [dev-dependencies]
