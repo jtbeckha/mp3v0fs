@@ -7,7 +7,7 @@ edition = "2018"
 [dependencies]
 claxon = { git = "https://github.com/jtbeckha/claxon.git" }
 #claxon = "0.4.2"
-crossbeam-utils = "0.7.0"
+crossbeam-utils = "0.8.7"
 id3 = "0.3.0"
 libc = "0.2"
 lame-sys = "0.1.2"
